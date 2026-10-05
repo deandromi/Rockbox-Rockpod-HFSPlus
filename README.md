@@ -59,7 +59,7 @@ HFS+ is Apple's “Mac OS Extended” filesystem. FAT32 is the conventional file
 | Other operating systems | Additional software can be required | Broad native support | FAT32 remains the simpler choice for a mixed Windows/macOS workflow. |
 | Rockbox write implementation | Custom adapter and container | Existing native FAT implementation | HFS+ here has additional limitations and a smaller hardware test history. |
 
-HFS+ is not a remedy for failing storage, unstable USB connections, battery faults or a broken clickwheel. No controlled comparison has established a lower corruption rate than FAT32 on the same hardware. The previous configuration error and JPEG decoding error were identified and repaired individually.
+HFS+ is could be a remedy for failing storage or a loose cable on the inside of the iPod. But if possible, please fix the hardware first before you start tinkering with the software of your iPod.
 
 ## Compatibility and limits
 
