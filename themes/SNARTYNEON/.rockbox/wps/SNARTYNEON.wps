@@ -1,0 +1,270 @@
+#
+#        .d8888b.  888b    888        d8888 8888888b. 88888888888 Y88b   d88P
+#       d88P  Y88b 8888b   888       d88888 888   Y88b    888      Y88b d88P 
+#       Y88b.      88888b  888      d88P888 888    888    888       Y88o88P  
+#        "Y888b.   888Y88b 888     d88P 888 888   d88P    888        Y888P   
+#           "Y88b. 888 Y88b888    d88P  888 8888888P"     888         888    
+#             "888 888  Y88888   d88P   888 888 T88b      888         888    
+#       Y88b  d88P 888   Y8888  d8888888888 888  T88b     888         888    
+#        "Y8888P"  888    Y888 d88P     888 888   T88b    888         888    
+#
+#               Version 1.0
+#               Tirim4  2025
+#                CC-BY-SA
+
+#__by Simon Andén
+#__based on Original Theme: SPAZZ by Chuck Lardo & Spinoffs SNAZZ/SNAZZ2 by Jihoon Kim and SNAZZY by Phil Graves
+#__some elements & code altered from adwaitapod by even Dook
+#__licence  CC-BY-SA 4.0
+#__target resolution 320x240
+#__tested on Hifi Walker H2
+#__last updated 09/11/2025
+
+
+#__WPS File
+
+
+#__Hide The Status Bar
+%wd
+
+#__Preload Fonts
+%Fl(2,12-KodeMono-SemiBold.fnt)
+%Fl(3,15-KodeMono-SemiBold.fnt)
+%Fl(4,22-KodeMono-SemiBold.fnt)
+%Fl(5,29-KodeMono-SemiBold.fnt)
+%Fl(6,72-KodeMono-Bold.fnt)
+
+#__Preload Images
+%xl(H,BatteryStatus.bmp,12)
+%xl(repeat,RepeatStatus.bmp,4)
+%xl(shuffle,ShuffleStatus.bmp,0,0)
+%xl(AlbumArt,AlbumArt.bmp,0,0)
+%xl(P,bb_rbd_123.bmp,2)
+%xl(PBB,pb_back.bmp,0,0)
+%xl(PB,pb.bmp,0,0)
+%xl(BBB,bb_back.bmp,0,0)
+%xl(BB,bb.bmp,0,0)
+%xl(VBB,vb_back.bmp,0,0)
+%xl(VB,vb.bmp,0,0)
+%xl(PBI,Playback_Icons.bmp,5)
+%xl(O,OffOn.bmp,24,0,2)
+%xl(A,album_icon.bmp,0,1,2)
+
+#__Show Main Display unless Hold Switch is on
+%?mh<%Vd(LockScreen)%?C<%Vd(LockScreenA)|%Vd(LockScreenB)>|%Vd(MainDisplay)%?bc<%Vd(batCharge)|%Vd(bat)>>
+
+#----------- Main Display ---------#
+
+#__Volume Text
+%Vl(MainDisplay,20,19,45,31,4)%Vf(4ed6f7)
+%ac%pv%Vs(invert)
+
+#__Volume Bar
+%Vl(MainDisplay,70,22,100,18,-)%Vf(4ed6f7)
+%pv(0,0,100,18,VB,backdrop,VBB)
+
+###__Hold
+#%Vl(holdBar,70,20,100,30,4)
+#%acLOCKED%Vs(invert)
+
+#__Shuffle
+%Vl(MainDisplay,175,18,47,11,2)%Vf(4ed6f7)
+SHF%?ps<%xd(O,2)|%xd(O)>
+
+#__Repeat
+%Vl(MainDisplay,175,33,47,11,2)%Vf(4ed6f7)
+%?mm<RPT%xd(O)|RPT%xd(O,2)|RP1%xd(O,2)|RND%xd(O,2)|A-B%xd(O,2)>
+
+#__Battery BAR
+%Vl(MainDisplay,-93,17,73,9,-)%Vf(4ed6f7)
+%bl(0,0,73,9,BB,backdrop,BBB)
+
+#__Battery Text Percent
+%Vl(bat,-93,28,73,17,3)%Vf(4ed6f7)
+%ac%t(8)%xd(P) %bl%%%Vs(invert);%ac%?if(%bt, =, -1)<%t(0)|%t(8)%bt%Vs(invert)>;%t(8)%ac%xd(P)  %?cf<%cH:%cM%Vs(invert)|%?cl<1|2|3|4|5|6|7|8|9|10|11|12>:%cM%cP%Vs(invert)>
+%Vl(batCharge,-93,28,73,17,3)
+%ac%t(8)CHARGING%Vs(invert);%t(8)%ac%xd(P,2) %bl%%%Vs(invert);%t(8)%ac%xd(P,2)  %?cf<%cH:%cM%Vs(invert)|%?cl<1|2|3|4|5|6|7|8|9|10|11|12>:%cM%cP%Vs(invert)>
+
+#__Top Line
+%Vl(MainDisplay,20,57,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
+
+#__Track Progress Bar
+%Vl(MainDisplay,20,194,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
+%Vl(MainDisplay,20,195,280,5,-)%Vf(dcc8b6)
+%pb(0,0,280,5,PBB,slider,PB)
+%Vl(MainDisplay,20,200,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
+
+#__Album Art
+%Vl(MainDisplay,21,69,114,114,-)%Vf(dcc8b6)
+%Cl(1,1,112,112,c,c)
+%dr(0,0,114,1)%dr(0,113,114,1)%dr(0,1,1,112)%dr(113,1,1,112)
+%Cd
+
+%Vl(Maindisplay,21,69,114,114,-)%Vf(dcc8b6)
+%xd(AlbumArt)
+
+#__Track Title
+%Vl(MainDisplay,142,70,165,17,3)%Vf(dcc8b6)
+%al%s%?it<%it|%fn>
+
+#__Artist
+%Vl(MainDisplay,142,90,165,17,3)%Vf(dcc8b6)
+%al%s%?ia<%ia|NO TAG>
+
+#__Album
+%Vl(MainDisplay,142,112,165,22,4)%Vf(4ed6f7)
+%al%s%?id<%id|NO ALBUM>
+
+# Album Year
+%Vl(MainDisplay,142,141,165,17,3)%Vf(dcc8b6)
+%al%s%?iy<Year: %iy|Year:  ---->
+
+#__File Info
+%Vl(MainDisplay,142,161,165,17,3)%Vf(dcc8b6)
+%al%s%fc | %fk kHz
+
+#__Peak Meter Bars
+#%Vl(MainDisplay,140,153,165,30,5)%Vf(dcc8b6)
+#%pm
+
+#__Play/Pause Icons
+%V(20,214,21,11,-)%Vf(4ed6f7)
+%?mp<%xd(PBI,1)|%xd(PBI,2)|%xd(PBI,3)|%xd(PBI,4)|%xd(PBI,5)>
+
+#__Next Up Selector%Vf(4ed6f7)
+%?pE(20)<%?pS(10)<%Vd(curInfo)|%Vd(nextInfo)>|%Vd(curInfo)>
+
+#__Track Time / Playlist position / Play count
+%Vl(curInfo,43,211,257,20,3)%Vf(4ed6f7)
+%al%pc/%pt%ac%pp/<%ar%pp/%pe%ac%pp/%pe%ar%?cf<%cH:%cM|%ck:%cM %cp>
+
+#__Next Up
+%Vl(nextInfo,42,211,22,20,3)%Vf(4ed6f7)
+%ac→%Vs(invert)
+%Vl(nextInfo,64,211,235,20,3)%Vf(4ed6f7)
+%ac%s%?Ia<%Ia%?It< - %It>|%Fn> %Vs(invert)
+
+# Locked
+%Vl(locked,71,16,-154,22,4)Vf(4ed6f7)
+%acLOCKED%Vs(invert)
+
+
+#-------- Lock Screen Layer -------#
+
+#__Volume Text
+%Vl(LockScreen,20,19,45,31,4)%Vf(4ed6f7)
+%ac%pv%Vs(invert)
+
+#__Volume Bar
+#%Vl(LockScreen,70,22,100,18,-)%Vf(4ed6f7)
+#%pv(0,0,100,18,VB,backdrop,VBB)
+
+# Locked
+%Vl(LockScreen,71,20,-154,22,4)%Vf(4ed6f7)
+%acLOCKED%Vs(invert)
+
+#__Username - Max 8 characters anything more will scroll
+#%Vl(LockScreen,20,8,64,17,3)
+#%al%sROCKBOX
+
+#__Hold
+#%Vl(LockScreen,90,8,81,17,3)
+#%?mh<%acLOCKED%Vs(invert)|>
+
+#__Shuffle
+%Vl(LockScreen,175,18,47,11,2)%Vf(4ed6f7)
+SHF%?ps<%xd(O,2)|%xd(O)>
+
+#__Repeat
+%Vl(LockScreen,175,33,47,11,2)%Vf(4ed6f7)
+%?mm<RPT%xd(O)|RPT%xd(O,2)|RP1%xd(O,2)|RND%xd(O,2)|A-B%xd(O,2)>
+
+
+
+#__Repeat
+#%Vl(LockScreen,220,11,21,12,-)%Vf(4ed6f7)
+#%?and(%if(%ps, =, 1),%or(%if(%mm, =, 1),%if(%mm, >, 1)),%or(%if(%fc, !=, 4),%if(%fc, !=, 5),%if(%fc, !=, 7),%if(%fc, !=, 11),%if(%fc, !=, 13)))<%xd(shuffle,%ps)>
+#%?and(%if(%ps, =, 1),%or(%if(%mm, =, 1),%if(%mm, >, 1)),%or(%if(%fc, =, 4),%if(%fc, =, 5),%if(%fc, =, 7),%if(%fc, =, 11),%if(%fc, =, 13)))<%xd(shuffle,%ps)>
+#%?and(%if(%ps, !=, 1),%if(%mm, >, 1),%or(%if(%fc, !=, 4),%if(%fc, !=, 5),%if(%fc, !=, 7),%if(%fc, !=, 11),%if(%fc, !=, 13)))<%xd(repeat,%mm,-1)>
+
+#__Shuffle
+#%Vl(LockScreen,192,11,21,11,-)%Vf(4ed6f7)
+#%?and(%if(%ps, =, 1),%if(%mm, >, 1),%or(%if(%fc, =, 4),%if(%fc, =, 5),%if(%fc, =, 7),%if(%fc, =, 11),%if(%fc, =, 13)))<%xd(repeat,%mm)>
+#%?and(%if(%ps, =, 1),%if(%mm, >, 1),%or(%if(%fc, !=, 4),%if(%fc, !=, 5),%if(%fc, !=, 7),%if(%fc, !=, 11),%if(%fc, !=, 13)))<%xd(repeat,%mm,-1)>
+
+#__Battery BAR
+%Vl(LockScreen,-93,17,73,9,-)%Vf(4ed6f7)
+%bl(0,0,73,9,BB,backdrop,BBB)
+
+#__Battery Text Percent
+%Vl(LockScreen,-93,28,73,17,3)%Vf(4ed6f7)
+%ac%t(8)%xd(P) %bl%%%Vs(invert);%ac%?if(%bt, =, -1)<%t(0)|%t(8)%bt%Vs(invert)>;%t(8)%ac%xd(P)  %?cf<%cH:%cM%Vs(invert)|%?cl<1|2|3|4|5|6|7|8|9|10|11|12>:%cM%cP%Vs(invert)>
+%Vl(batCharge,-93,28,73,17,3)
+%ac%t(8)CHARGING%Vs(invert);%t(8)%ac%xd(P,2) %bl%%%Vs(invert);%t(8)%ac%xd(P,2)  %?cf<%cH:%cM%Vs(invert)|%?cl<1|2|3|4|5|6|7|8|9|10|11|12>:%cM%cP%Vs(invert)>
+
+
+
+
+
+
+#__Battery Text
+#%Vl(LockScreen,265,8,35,20,3)
+#%ar%bl%%
+
+#__Battery Icon
+#%Vl(LockScreen,248,11,21,11,-)
+#%?bp<%xd(Hl)|%?bl<%xd(Ha)|%xd(Hb)|%xd(Hc)|%xd(Hd)|%xd(He)|%xd(Hf)|%xd(Hg)|%xd(Hh)|%xd(Hi)|%xd(Hj)|%xd(Hk)>>
+
+#__Time
+#%Vl(LockScreen,20,25,100,30,5)
+#%al%?cf<%cH:%cM|%?cl<1|2|3|4|5|6|7|8|9|10|11|12>:%cM%cP>
+
+__Date
+#%Vl(LockScreen,163,34,135,26,3)
+#%ar%?cu<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>, %cb %cd
+
+#__Top Line
+%Vl(LockScreen,20,57,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
+
+#__Album Art
+%Vl(LockScreenA,21,69,114,114,-)
+%Cl(1,1,112,112,c,c)%Vf(dcc8b6)
+%dr(0,0,114,1)%dr(0,113,114,1)%dr(0,1,1,112)%dr(113,1,1,112)
+%Cd
+%Vl(LockScreenB,21,69,114,114,-)%Vf(dcc8b6)
+%xd(AlbumArt)
+
+#__Track Title
+%Vl(LockScreen,142,70,165,17,3)
+%al%s%?it<%it|%fn>
+
+#__Artist
+%Vl(LockScreen,142,90,165,17,3)
+%al%s%?ia<%ia|NO TAG>
+
+#__Album
+%Vl(LockScreen,142,112,165,22,4)%Vf(4ed6f7)
+%al%s%?id<%id|NO ALBUM>
+
+# Album Year
+%Vl(LockScreen,142,141,165,15,3)
+%al%s%?iy<Year: %iy|Year:  ---->
+
+#__File Info
+%Vl(LockScreen,142,161,165,15,3)
+%al%s%fc | %fk kHz
+
+
+
+#__Track Progress Bar
+%Vl(LockScreen,20,194,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
+%Vl(LockScreen,20,195,280,5,-)%Vf(dcc8b6)
+%pb(0,0,280,5,PBB,slider,PB)%Vf(dcc8b6)
+%Vl(LockScreen,20,200,280,1,-)%Vf(dcc8b6)
+%Vl(LockScreen,20,200,280,1,-)%Vf(dcc8b6)
+%dr(0,0,280,1)
