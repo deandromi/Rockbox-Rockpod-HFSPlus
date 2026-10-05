@@ -320,9 +320,52 @@ make -C utils/mks5lboot -j"$(sysctl -n hw.ncpu)" CC=clang \
 
 Its macOS backend uses IOKit and CoreFoundation. The resulting executable is `utils/mks5lboot/mks5lboot`.
 
-### Optional database host tool
+### macOS database host tool
 
-Rockpod can build its database on the player. A host database build is a separate developer operation, not a prerequisite for the initial firmware build. The source includes the macOS host fixes used during development. If a generated host Makefile incorrectly selects the ARM compiler or includes Clang-incompatible flags, regenerate that host build rather than editing the firmware Makefile.
+Build the music database on the Mac for this release. On-device database initialization was extremely unstable on the tested iPod, so it is not the installation or maintenance workflow documented here. The host program is separate from the ARM firmware: it scans audio tags and commits native `.rockbox/database_*.tcd` files while the iPod is mounted in Apple Disk Mode.
+
+Use the source checkout in a path without spaces. The macOS `strlcpy`/`strlcat` compatibility fix and computer-tool `logf` fix are already included; do not apply the old development patches again. Configure currently uses the inherited Homebrew GCC selection on macOS before the generated host Makefile is corrected to native Clang. Install the native configure dependencies if absent:
+
+```sh
+brew install gcc@15 sdl2
+```
+
+Create a dedicated database build directory, separate from the firmware and bootloader builds:
+
+```sh
+cd "$HOME/Developer/Rockpod-HFSPlus-build" &&
+mkdir -p build-ipod6g-database &&
+cd build-ipod6g-database &&
+../tools/configure --target=ipod6g --type=d
+```
+
+Correct only this host build's generated Makefile. This avoids accidentally building a Mac program with the ARM compiler and removes flags unsupported by Apple's Clang:
+
+```sh
+sed -i '' \
+  -e 's#^export CC=.*#export CC=/usr/bin/clang#' \
+  -e 's#^export HOSTCC=.*#export HOSTCC=/usr/bin/clang#' \
+  -e 's#^export CPP=.*#export CPP=/usr/bin/clang -E#' \
+  -e 's#^export AR=.*#export AR=/usr/bin/ar#' \
+  -e 's/ -funit-at-a-time//g' \
+  -e 's/ -Wimplicit-fallthrough=0//g' \
+  Makefile
+
+make -j"$(sysctl -n hw.ncpu)"
+ls -lh database.ipod6g
+file database.ipod6g
+```
+
+`database.ipod6g` must be a native macOS executable, rather than an ARM firmware image. Regenerating the Makefile overwrites the compiler corrections; repeat them after reconfiguration. If reusing an old host build produces a missing dependency such as `build-ipod6g-database/time.h`, clear that build directory's generated dependencies and objects before rebuilding:
+
+```sh
+rm -f make.dep make.dep_
+find . -type f -name '*.o' -delete
+make -j"$(sysctl -n hw.ncpu)" dep &&
+make -j"$(sysctl -n hw.ncpu)"
+```
+
+These cleanup commands belong inside `build-ipod6g-database`, not the source root or the iPod. The database tool is built once; reuse it for subsequent music-library rebuilds. Follow the Mac database procedure below to run it.
 
 ## Music, database and album art
 
@@ -335,18 +378,100 @@ Store music in ordinary album directories on the base HFS+ volume, for example:
 /Music/Artist/Year - Album/cover.jpg
 ```
 
-### Build the Rockbox music database on the iPod
+### Build the Rockbox music database on the Mac
 
-The music database contains the audio tags used by **Database** and Cover Flow. Neither of the Python scripts below builds this database. File browsing can play music before a database exists, but database browsing and the PictureFlow album index require a completed database.
+The Rockbox music database contains the audio tags used by **Database** and Cover Flow. Build it with the native `database.ipod6g` program described above. The Python **index** script then creates PictureFlow's album index from the completed music database; the Python **cache** script creates the `.pfraw` covers. Neither Python script scans and builds the Rockbox music database itself.
 
-1. Finish copying the music to `/Music` on the mounted iPod. Use consistent **Album** and **Album Artist** tags; the cache script falls back to **Artist** when Album Artist is absent. Each album directory should contain its own `cover.jpg` for the Mac artwork generator.
-2. Synchronize and eject the iPod cleanly from macOS, then start Rockpod. Check that **HFS+ overlay: READY** is shown in the disk diagnostics before starting database writes.
-3. Open **Settings → General Settings → Database → Select directories to scan**. Select `/Music` and leave the folder selector after saving the selection. If it offers to initialize the database immediately, accept; otherwise continue with the next step. Menu names here are the English labels; translated firmware uses corresponding translated names.
-4. Choose **Initialize Now** in the same Database settings menu for the first build or a complete rebuild. The scan runs in the background. Open **Database** from the main menu to see the building/committing progress. Leave the player powered on until scanning and committing finish; do not connect USB or force a reset during the operation. Restart if the firmware requests it.
-5. Open **Database → Artist** or **Database → Album**, select a track and confirm playback. Only after this works should you prepare or refresh Cover Flow's index and artwork cache.
-6. After adding music, use **Settings → General Settings → Database → Update Now** and wait for completion again. **Initialize Now** performs a full rebuild; **Update Now** refreshes an existing database. **Auto Update** is optional. If you maintain the PictureFlow index on the Mac, update that index after each music-database change as well.
+For Stable V1.0, use **Mac database → Mac PictureFlow index → Mac artwork cache → clean eject → playback**. Do not use **Initialize Now** or **Update Now** on the iPod as part of this workflow: rebuilding there was extremely unstable on the tested device. In **Settings → General Settings → Database**, keep **Auto Update** set to **No**. For the initial database verification, leave **Load to RAM** off so that disk-based database access is checked first; loading to RAM is a separate setting, not a database-building step.
 
-Database files generated by Rockpod can live in the writable overlay. macOS sees the base HFS+ files, rather than the merged view used by Rockpod. A Mac-visible `database_idx.tcd` therefore does not establish that it is the current database used by the player. A host-generated database can also be shadowed by older overlay entries. Do not delete or recreate `.rockpod-rw` to make the host scripts work: it can contain the active database, settings and playlists.
+1. Finish copying the music to `/Music`. Use consistent **Album** and **Album Artist** tags; the artwork script falls back to **Artist** when Album Artist is absent. Put a square `cover.jpg` in each album directory for the artwork generator.
+2. Mount the iPod in **Apple Disk Mode** on the Mac. Verify its actual mount point and that `.rockbox` exists. These commands assume `/Volumes/IPOD`.
+3. Before a full rebuild, back up the native database files and check for overlay entries that could hide the replacements. The following command reads the overlay without changing it, copies all matching native files to the Documents backup folder, verifies those copies, and only then removes the native originals. It stops before changing iPod files if database overlay entries or an unknown overlay layout are found.
+
+```sh
+python3 - <<'PYDB'
+from pathlib import Path
+import shutil
+import struct
+import tempfile
+
+root = Path('/Volumes/IPOD')
+rb = root / '.rockbox'
+if not root.is_mount() or not rb.is_dir():
+    raise SystemExit('STOP: mount the iPod in Apple Disk Mode and verify .rockbox.')
+
+overlay = root / '.rockpod-rw'
+if overlay.exists():
+    with overlay.open('rb') as f:
+        header = f.read(40)
+        if len(header) != 40 or header[:8] != b'RPOVL11\0':
+            raise SystemExit('STOP: unknown overlay header; no files changed.')
+        version, block, count, total, bitmap = struct.unpack_from('<5I', header, 8)
+        if ((version, block, count) != (1, 4096, 2048)
+                or total * block > overlay.stat().st_size
+                or bitmap != (total + 7) // 8):
+            raise SystemExit('STOP: unknown overlay layout; no files changed.')
+        f.seek((1 + (bitmap + block - 1) // block) * block)
+        conflicts = []
+        for slot in range(count):
+            entry = f.read(320)
+            if len(entry) != 320:
+                raise SystemExit('STOP: truncated overlay table; no files changed.')
+            flags = struct.unpack_from('<I', entry, 8)[0]
+            if not flags & 1:
+                continue
+            length = struct.unpack_from('<H', entry, 38)[0]
+            if length > 260:
+                raise SystemExit('STOP: invalid overlay entry; no files changed.')
+            name = entry[40:40 + length].decode('utf-8')
+            if name.startswith('database_'):
+                conflicts.append((slot, name))
+        if conflicts:
+            for slot, name in conflicts:
+                print(f'Overlay database entry: slot {slot}: {name}')
+            raise SystemExit('STOP: database overlay entries may shadow the Mac files; no files changed.')
+
+files = sorted(rb.glob('database_*.tcd'))
+marker = rb / 'database_commit.ignore'
+if marker.exists():
+    files.append(marker)
+if any(not p.is_file() or p.is_symlink() for p in files):
+    raise SystemExit('STOP: unexpected database file type; no files changed.')
+parent = Path.home() / 'Documents/iPod bestanden/Backups'
+parent.mkdir(parents=True, exist_ok=True)
+backup = Path(tempfile.mkdtemp(prefix='rockpod-database-', dir=parent))
+for source in files:
+    dest = backup / source.name
+    shutil.copy2(source, dest)
+    if source.read_bytes() != dest.read_bytes():
+        raise SystemExit('STOP: backup verification failed; originals retained.')
+for source in files:
+    source.unlink()
+print(f'Backed up {len(files)} native database files to {backup}')
+PYDB
+```
+
+If that check stops, do not continue with the host build. An overlay entry can contain an old database file or deletion record that hides a Mac-written replacement. Removing native files in Finder does not remove such an entry. Preserve `.rockpod-rw` and diagnose the reported slots before proceeding; do not wipe the overlay, because it also holds settings and playlists. This is a conservative filename check, not a general overlay repair tool.
+
+4. Run the native tool **from the iPod volume root**, keeping the Mac awake and saving its output in Documents:
+
+```sh
+database_tool="$HOME/Developer/Rockpod-HFSPlus-build/build-ipod6g-database/database.ipod6g"
+log_dir="$HOME/Documents/iPod bestanden/Logs"
+mkdir -p "$log_dir"
+cd "/Volumes/IPOD" &&
+test -d .rockbox &&
+test -x "$database_tool" &&
+set -o pipefail &&
+caffeinate -i "$database_tool" 2>&1 | tee "$log_dir/rockpod-database-build.log"
+```
+
+The program scans from the mounted player's root, including `/Music`, and commits the database on the Mac. It does not accept a music-directory argument. Leave the iPod connected until it finishes; do not interrupt a database write. A full rebuild replaces the native tag database and can lose runtime statistics from that database; the backup retains its previous files. If the tool reports a failure, retain the log and backup rather than continuing to boot a partially built database.
+
+5. Keep the iPod mounted. Follow the index and artwork commands below in that order. The index script validates that the native music database is non-empty, compatible, committed and has no pending temporary database. Do not reboot into Rockpod between creating the database and installing the matching index/cache.
+6. Synchronize, eject and disconnect as described below. Start Rockpod, confirm **HFS+ overlay: READY**, then test playback through **Database** and Cover Flow. After adding or retagging music, repeat the Mac database rebuild and refresh the matching PictureFlow index/cache; keep on-device **Auto Update** disabled.
+
+macOS sees the base HFS+ files, rather than the merged view used by Rockpod. A Mac-visible `database_idx.tcd` alone therefore does not establish that it is the database used by the player. The overlay check above is part of the host workflow for an existing installation.
 
 ### Optional Mac helpers for Cover Flow
 
@@ -363,19 +488,19 @@ Use these helpers while the iPod is mounted in **Apple Disk Mode** on the Mac. B
 brew install python ffmpeg
 ```
 
-The index helper requires native `.rockbox/database_idx.tcd`, `database_1.tcd` and `database_7.tcd`, with the v12 database format (`0x54434810`), at least one track, and no pending `database_tmp.tcd`. These must be the same database files used by Rockpod. **If the current database exists only in the overlay, or overlay entries shadow the native database, this helper cannot build the correct index from the Mac-visible files.** It does not extract database files from `.rockpod-rw`. In that case, let Cover Flow build its index on the player from the active database. A native index created from an older base database can point to the wrong album or track.
+The index helper requires native `.rockbox/database_idx.tcd`, `database_1.tcd` and `database_7.tcd`, with the v12 database format (`0x54434810`), at least one track, and no pending `database_tmp.tcd`. These must be the same database files used by Rockpod. **If the current database exists only in the overlay, or overlay entries shadow the native database, this helper cannot build the correct index from the Mac-visible files.** It does not extract database files from `.rockpod-rw`. In that case, stop and resolve the database overlay conflict before using the Mac helpers. A native index created from an older base database can point to the wrong album or track.
 
-First validate and stage an index without changing the iPod. The source path below uses the original Documents folder; Python scripts can run from paths containing spaces even though the firmware build system cannot:
+First validate and stage an index without changing the iPod. Use the same checkout as the database tool; the staging files and backups are saved under Documents:
 
 ```sh
-rockpod_source="$HOME/Documents/iPod bestanden/rockpod-hfsplus-ipod6g-v12"
+rockpod_source="$HOME/Developer/Rockpod-HFSPlus-build"
 
 python3 "$rockpod_source/tools/rockpod/build_rockpod_coverflow_index.py" \
   --ipod "/Volumes/IPOD" \
   --output-dir "$HOME/Documents/iPod bestanden/Backups"
 ```
 
-For a Git checkout in `~/Developer/Rockpod-HFSPlus-build`, set `rockpod_source="$HOME/Developer/Rockpod-HFSPlus-build"` instead. The script prints the staging directory containing the three generated files and `report.json`. Without `--install`, it does not modify the iPod. Once the native database is known to be current, install the index with:
+If the Python scripts are in the original Documents source folder, set `rockpod_source="$HOME/Documents/iPod bestanden/rockpod-hfsplus-ipod6g-v12"` instead; Python can run from paths containing spaces. The script prints the staging directory containing the three generated files and `report.json`. Without `--install`, it does not modify the iPod. Once the native database is known to be current, install the index with:
 
 ```sh
 python3 "$rockpod_source/tools/rockpod/build_rockpod_coverflow_index.py" \
