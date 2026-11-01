@@ -7,6 +7,11 @@
 #if !defined(SIMULATOR) && !defined(__PCTOOL__)
 #define HAVE_HFSPLUS_RO
 #define HAVE_STORAGE_FLUSH
+/* The Classic exposes one HFS+ data partition.  Keeping one state avoids
+ * reserving four copies of the overlay/bitmap/dir-index BSS. */
+#define HFS_NUM_VOLUMES 1
+/* Disk Mode may hide the USB-written MBR from the ATA view. */
+#define HFS_FALLBACK_OFFSET (16510ull * 4096ull)
 #endif
 
 /* For Rolo and boot loader */

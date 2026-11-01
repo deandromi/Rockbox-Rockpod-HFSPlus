@@ -139,9 +139,9 @@ int main(int argc, char **argv)
     if (!strcmp(command, "info")) {
         printf("HFS+ read-only prototype\nblock_size=%" PRIu32
                "\nblocks=%" PRIu32 "\nfree_blocks=%" PRIu32
-               "\nnode_size=%u\njournaled=%u\n",
+               "\nnode_size=%u\njournaled=%u\nrecovered=%u\n",
                v.block_size, v.blocks, v.free_blocks, v.node_size,
-               !!(v.attributes & (1u << 13)));
+               !!(v.attributes & (1u << 13)), v.recovery);
         goto done;
     }
     rc = hfs_ro_lookup(&v, path, &entry);

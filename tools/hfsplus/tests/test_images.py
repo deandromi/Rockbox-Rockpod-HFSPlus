@@ -12,6 +12,8 @@ import unittest
 
 BLOCK = 4096
 BLOCKS = 256
+CONTAINER_START = 1000
+CONTAINER_BLOCKS = 4096
 CAT = 5 * BLOCK
 UNICODE_NAME = "E\u0301tude 🎵.bin"
 PAYLOAD = bytes((i * 37 + 19) % 256 for i in range(5003))
@@ -41,9 +43,13 @@ def key(parent, name):
     return struct.pack(">HIH", len(encoded) + 6, parent, len(encoded) // 2) + encoded
 
 
+HFS_DATE = 0xE0000000  # a plausible 2026 HFS+ timestamp
+
 def folder(parent, name, cnid, children):
     data = bytearray(88)
     struct.pack_into(">HHII", data, 0, 1, 0, children, cnid)
+    put32(data, 12, HFS_DATE)
+    put32(data, 16, HFS_DATE)
     put16(data, 42, 0o40755)
     return key(parent, name) + data
 
@@ -51,6 +57,8 @@ def folder(parent, name, cnid, children):
 def file_record(parent, name, cnid, size, extents, mode=0o100644, flags=0):
     data = bytearray(248)
     struct.pack_into(">HHII", data, 0, 2, 2, 0, cnid)
+    put32(data, 12, HFS_DATE)
+    put32(data, 16, HFS_DATE)
     put16(data, 42, mode)
     data[41] = flags
     data[88:168] = fork(size, extents)
@@ -94,12 +102,14 @@ def checksum(b):
     return value ^ 0xffffffff
 
 
-def image(journal=False, little=False):
-    b = bytearray(BLOCK * BLOCKS)
+def image(journal=False, little=False, blocks=BLOCKS, container=False):
+    b = bytearray(BLOCK * blocks)
     records = [
         folder(1, "Test volume", 2, 2),
         thread(2, 1, "Test volume", True),
         folder(2, ".rockbox", 16, 1),
+        *([file_record(2, ".rockpod-rw", 25, 16 * 1024 * 1024,
+                       [(CONTAINER_START, CONTAINER_BLOCKS)])] if container else []),
         folder(2, "Music", 17, 3),
         thread(16, 2, ".rockbox", True),
         file_record(16, "rockbox.ipod", 18, 12, [(26, 1)]),
@@ -111,8 +121,10 @@ def image(journal=False, little=False):
         thread(19, 17, "track.bin"),
         thread(20, 17, UNICODE_NAME),
         thread(21, 17, "empty.bin"),
+        *([thread(25, 2, ".rockpod-rw")] if container else []),
     ]
-    leaves = [records[:7], records[7:]]
+    split = (len(records) + 1) // 2
+    leaves = [records[:split], records[split:]]
     index = []
     for i, leaf in enumerate(leaves):
         k = leaf[0][:struct.unpack_from(">H", leaf[0])[0] + 2]
@@ -126,16 +138,16 @@ def image(journal=False, little=False):
     b[22 * BLOCK:22 * BLOCK + len(PAYLOAD) - BLOCK] = PAYLOAD[BLOCK:]
     b[24 * BLOCK:24 * BLOCK + 7] = b"unicode"
     b[26 * BLOCK:26 * BLOCK + 12] = b"TEST ONLY!!!"
-    allocated = {0, 3, 4, 5, 6, 7, 8, 20, 22, 24, 26, BLOCKS - 1}
+    allocated = {0, 3, 4, 5, 6, 7, 8, 20, 22, 24, 26, blocks - 1}
     vh = bytearray(512)
     struct.pack_into(">HHI", vh, 0, 0x482b, 4, (1 << 8) | ((1 << 13) if journal else 0))
     vh[8:12] = b"HFSJ" if journal else b"10.0"
     put32(vh, 32, 4)
     put32(vh, 36, 2)
     put32(vh, 40, BLOCK)
-    put32(vh, 44, BLOCKS)
+    put32(vh, 44, blocks)
     put32(vh, 64, 22)
-    vh[112:192] = fork(BLOCKS // 8, [(3, 1)])
+    vh[112:192] = fork(blocks // 8, [(3, 1)])
     vh[192:272] = fork(BLOCK, [(4, 1)])
     vh[272:352] = fork(BLOCK * 4, [(5, 4)])
     if journal:
@@ -152,9 +164,12 @@ def image(journal=False, little=False):
         struct.pack_into(order + "I", h, 36, checksum(h))
         b[32 * BLOCK:32 * BLOCK + len(h)] = h
         allocated.update({2, *range(32, 48)})
+    if container:
+        allocated.update(range(CONTAINER_START,
+                               CONTAINER_START + CONTAINER_BLOCKS))
     for n in allocated:
         b[3 * BLOCK + n // 8] |= 1 << (7 - n % 8)
-    put32(vh, 48, BLOCKS - len(allocated))
+    put32(vh, 48, blocks - len(allocated))
     b[1024:1536] = vh
     b[-1024:-512] = vh
     return b
@@ -277,11 +292,23 @@ class ImageTests(unittest.TestCase):
         for off, value in [(1064, 0), (1064, 513), (1068, 0xffffffff), (1072, BLOCKS + 1)]:
             b = image()
             put32(b, off, value)
+            # Corrupt the alternate copy too, otherwise HFS-132 recovery is
+            # expected to mount the volume read-only.
+            put32(b, len(b) - 1024 + off - 1024, value)
             self.run_image(b, ok=False)
         b = image()
         b[1024:1026] = b"HX"
         self.run_image(b, ok=False)
         self.run_image(image()[:1500], ok=False)
+
+    def test_alternate_volume_header_recovery(self):
+        b = image()
+        # Torn primary volume header; the alternate copy is intact.
+        put32(b, 1064, 513)
+        p = self.run_image(b, "info")
+        self.assertIn(b"recovered=1", p.stdout)
+        p = self.run_image(b, "cat", "/.rockbox/rockbox.ipod")
+        self.assertEqual(p.stdout, b"TEST ONLY!!!")
 
     def test_catalog_offsets_and_links(self):
         mutations = [

@@ -28,7 +28,7 @@ int main(void)
     assert(hfs_ro_mount(&v, fail_read, NULL, UINT64_MAX - 4, 4096, scratch, 512) == HFS_RO_ARGUMENT);
     assert(!reads && !v.mounted);
     assert(hfs_ro_mount(&v, fail_read, NULL, 0, 4096, scratch, 512) == HFS_RO_IO);
-    assert(reads == 1 && !v.mounted);
+    assert(reads == 2 && !v.mounted); /* primary + alternate */
     assert(hfs_ro_lookup(&v, "/", &e) == HFS_RO_ARGUMENT);
     assert(hfs_ro_iter_init(&v, 2, &it) == HFS_RO_ARGUMENT);
     assert(hfs_ro_pread(&v, &e, 0, buf, sizeof(buf), &done) == HFS_RO_ARGUMENT);
@@ -39,7 +39,7 @@ int main(void)
     e.data.blocks = 1;
     e.data.extents[0].count = 1;
     assert(!hfs_ro_pread(&v, &e, UINT64_MAX, buf, sizeof(buf), &done));
-    assert(!done && reads == 1);
+    assert(!done && reads == 2);
     assert(hfs_ro_pread(&v, &e, 0, NULL, 1, &done) == HFS_RO_ARGUMENT);
     e.kind = 1;
     assert(hfs_ro_pread(&v, &e, 0, buf, 1, &done) == HFS_RO_IS_DIR);

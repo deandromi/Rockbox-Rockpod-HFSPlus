@@ -1,7 +1,7 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Release identity: **Rockpod HFS+ — Stable V1.1 // Version V12.1**.
+Release identity: **Rockpod HFS+ — Stable V2.0 // Version V12.2**.
 Internal version file: `docs/VERSION` = `1.0-v12.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
@@ -46,7 +46,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 | **Track-index lock (HFS-129)** | **FIXED in V1.1 (build)**: every exit releases/guards the mutex. |
 | **Reselect negative artist (HFS-130)** | **FIXED in V1.1 (build)**: bounded accessors and sentinel handling. |
 | **MBR abort on bad entry (HFS-131)** | **FIXED in V1.1 (host)**: malformed entry 0 no longer hides valid entry 1. |
-| **Primary header only (HFS-132)** | **FAIL / S2**: a torn primary volume header ignores a valid HFS+ alternate header; recovery is impossible without Mac tools. |
+| **Primary header only (HFS-132)** | **FIXED in V2.0 (host)**: a validated alternate header mounts read-only with `recovered=1`; both copies corrupt fails closed. |
 | **Theme persistence (HFS-133)** | **FIXED in code V1.1 (device test pending)**: fsync + forced storage-idle commit; config.new promotion reproduced on host. |
 | **Mount unwind (HFS-010)** | **FIXED in V1.1 (host)**: failed mounts unmount and the next mount is retried. |
 | Adapter write-path default test | Not run by `make test`; `test_native_adapter` skips unless `HFS_RB_TESTS` is supplied. The temporary harness is not committed. |
@@ -58,7 +58,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 **Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. A normal Rockbox boot succeeded. V1.1 hardens the settings commit and forces the storage-idle flush after a theme/config load (HFS-133); the controlled reboot test is still required on hardware. See `docs/ipod-device-investigation.md`.
 
-**Conclusion:** V1.1 fixes the S0 overlay/namespace/PictureFlow blockers and passes the host/build checks. The device booted normally with the current overlay; the theme-persistence fix still needs the controlled clean-reboot test. Remaining OPEN findings in `BUGFIXES.md` are not claimed fixed. See `docs/hfsplus-audit.md` and `docs/ipod-device-investigation.md`.
+**Conclusion:** V2.0 addresses every remaining audit finding and passes the reader, partition, adapter and sanitizer host checks. Six format/compatibility limits are documented. The device booted normally with the current overlay; the controlled theme/clean-reboot test remains the hardware acceptance check. See `docs/hfsplus-audit.md` and `docs/ipod-device-investigation.md`.
 
 ---
 
@@ -84,7 +84,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 ### 1.3 Naming
 
-- Public name: **Stable V1.1 // Version V12.1**.
+- Public name: **Stable V2.0 // Version V12.2**.
 - `docs/VERSION`: `1.0-v12.0`.
 - Built firmware version appends the UTC build date, e.g. `1.0-v12.0-261101`.
 - Internal overlay magic/version: `RPOVL11`, format version 1. This is **not** the public release number.
@@ -728,7 +728,7 @@ A successful firmware extraction, overlay initialization and bootloader install 
 
 ## 13. Music database and Cover Flow pipeline
 
-For Stable V1.1, use:
+For Stable V2.0, use:
 
 **Mac database -> Mac PictureFlow index -> Mac artwork cache -> clean eject -> playback.**
 
@@ -890,7 +890,7 @@ Operational rules:
 - Use Apple Disk Mode for all file transfer, backup and database work.
 - Do not use Rockbox USB mode as a substitute for Disk Mode.
 - Do not conclude that a disk is healthy merely because it mounts in Rockbox USB mode.
-- V1.1 fixes the overlay bitmap/entry validation and commit ordering (HFS-001/002); the remaining format-hardening item is the checksum/backup-header work (HFS-040).
+- V2.0 adds the overlay header checksum and block-1 backup (HFS-040) on top of the V1.1 bitmap/entry validation and commit ordering (HFS-001/002).
 - If a device was connected in Rockbox USB mode, cleanly eject it and reboot; if startup reports `-4`, follow §15.1. Do not bypass the consistency checks or delete the overlay.
 
 ---
@@ -911,20 +911,20 @@ Operational rules:
 | Overlay long names | Host adapter test with a 765-byte HFS+ name | No overflow; reject or bound to `FAT_DIRENTRY_NAME_MAX` | **PASS in V1.1 (host)** |
 | Directory rename namespace | Host adapter test: delete/create child, rename parent | Deleted child stays hidden; new child stays visible | **PASS in V1.1 (host)** |
 | Bootloader native fallback | Hide `/.rockbox` in overlay on a copy; boot | Bootloader still loads native `/.rockbox/rockbox.ipod` | **PASS in code (hardware boot test pending)** |
-| Base/overlay identity | Two open handles for one base file; rename/move flows | One logical object, one shadow; `fat_file_is_same`/`fat_dir_is_parent` agree | **FAIL (HFS-025/108/109)** |
+| Base/overlay identity | Two open handles for one base file; rename/move flows | One logical object, one shadow; `fat_file_is_same`/`fat_dir_is_parent` agree | **PASS in V2.0 (host)** |
 | PictureFlow corrupt cache/index | Feed truncated/hostile `.pfraw` and album index | Reject without memory errors; report cache failure | **FIXED (host build; device cache test pending)** |
 | CNID reuse / tombstone identity | Reuse a deleted base CNID with a new name | New object is not hidden by the old tombstone | **PASS in V1.1 (host)** |
-| HFS direntry timestamps | Read directory metadata | Plausible create/modify time, not 1980/zero | **FAIL (HFS-085)** |
+| HFS direntry timestamps | Read directory metadata | Plausible create/modify time, not 1980/zero | **PASS in V2.0 (host)** |
 | Partition scanner adversarial cases | MBR 512/4096, raw-vs-MBR, GPT dual-unit, bad entry before valid | Real HFS+ partition selected in every case | **PASS in V1.1 (host)** |
 | Non-overlay EOF write | Host adapter test: write past native size | Rejected before modifying data | **PASS in V1.1 (host)** |
 | Mount unwind | Inject fast-index failure | Volume unmounted; next mount succeeds | **PASS in V1.1 (host)** |
-| Invalid overlay fail-closed | Corrupt overlay version/header; attempt native same-size write | Mount reports overlay failure; no native write occurs; clear diagnostic | **FAIL (HFS-123)** |
-| Overlay ID collision | Patch an entry ID to a native CNID; open both names | IDs rejected/normalized; native name opens native data | **FAIL (HFS-124)** |
-| BASE shadow close/write | Rename native file; close without writing; then write | No block leak; bitmap ownership matches entry | **FAIL (HFS-125)** |
-| Catalog key order | Change `.rockbox` parent key in a copy; list root | Corruption reported; `.rockbox` never silently omitted | **FAIL (HFS-126)** |
-| PictureFlow track-index lock | Repeated track-list/context-menu transitions; force tagcache failure | No deadlock; mutex held only while the index is valid | **FAIL (HFS-129)** |
-| PictureFlow no-artist reselect | Load an index with `artist_idx = -1`; change sort/reselect | No read before `artist_names`; no crash | **FAIL (HFS-130)** |
-| Alternate volume header | Corrupt primary header on a copy; mount | Read-only recovery or explicit failure; never silent write | **OPEN (HFS-132)** |
+| Invalid overlay fail-closed | Corrupt overlay version/header; attempt native same-size write | Mount reports overlay failure; no native write occurs; clear diagnostic | **PASS in V2.0 (host)** |
+| Overlay ID collision | Patch an entry ID to a native CNID; open both names | IDs rejected/normalized; native name opens native data | **PASS in V2.0 (host)** |
+| BASE shadow close/write | Rename native file; close without writing; then write | No block leak; bitmap ownership matches entry | **PASS in V2.0 (host)** |
+| Catalog key order | Change `.rockbox` parent key in a copy; list root | Corruption reported; `.rockbox` never silently omitted | **PASS in V2.0 (host)** |
+| PictureFlow track-index lock | Repeated track-list/context-menu transitions; force tagcache failure | No deadlock; mutex held only while the index is valid | **PASS in V2.0 (build)** |
+| PictureFlow no-artist reselect | Load an index with `artist_idx = -1`; change sort/reselect | No read before `artist_names`; no crash | **PASS in V2.0 (build)** |
+| Alternate volume header | Corrupt primary header on a copy; mount | Read-only recovery or explicit failure; never silent write | **PASS in V2.0 (host)** |
 | Theme persistence | Select theme → wait for storage idle → verify `.new` → clean power-off → reboot | Theme survives reboot | **FIXED in code; device reboot test pending (HFS-133)** |
 | DFU scan | `mks5lboot --dfuscan` | Device detected in DFU state 2 | Terminal output |
 | Bootloader install | `--bl-inst` (no `--single`) | Success tones + reboot | Output, tone observation |

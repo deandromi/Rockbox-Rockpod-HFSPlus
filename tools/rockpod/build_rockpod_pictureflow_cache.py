@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
+
+import overlay_check
 import struct
 import subprocess
 import sys
@@ -236,6 +239,17 @@ def album_dirs(root: Path) -> list[Path]:
     return sorted(set(result), key=lambda p: str(p).lower())
 
 
+def fsync_dir(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build non-dithered Rockpod PictureFlow .pfraw cache files."
@@ -352,37 +366,49 @@ def main() -> None:
         print("\nAll covers built successfully.")
 
         # Only now touch the live PictureFlow cache.
+        new_names = {built.name for _, _, _, built in generated}
+        native_ids = {name: (cache / name).stat().st_ino
+                      for name in new_names if (cache / name).exists()}
+        overlay_path = next((p / ".rockpod-rw" for p in cache.parents
+                             if (p / ".rockpod-rw").exists()), None)
+        if overlay_path is not None:
+            conflicts = overlay_check.conflicts(overlay_path, new_names,
+                                                native_ids)
+            if conflicts:
+                print("\nOverlay entries could hide the new cache files:")
+                for entry in conflicts:
+                    print(f"  slot {entry['slot']}: {entry['name']} "
+                          f"flags=0x{entry['flags']:x}")
+                fail("Refusing installation; no live .pfraw files were changed")
+
+        # Write every new image beside its target and replace atomically.  Old
+        # files are removed only after all replacements succeeded, so a failed
+        # build/install cannot leave PictureFlow without covers.
+        for _, _, _, built in generated:
+            target = cache / built.name
+            temporary = cache / f".pfraw-tmp-{built.name}"
+            shutil.copy2(built, temporary)
+            os.replace(temporary, target)
+            fsync_dir(cache)
+
         if not args.keep_old:
             removed = 0
             ignored_sidecars = 0
-
-            # Snapshot the list first. macOS may create/remove AppleDouble
-            # sidecars (._*.pfraw) while the folder is being modified.
             old_files = list(cache.glob("*.pfraw"))
-
             for old in old_files:
-                # PictureFlow's own fallback graphic is not an album cache entry.
-                if old.name == "emptyslide.pfraw":
+                if old.name == "emptyslide.pfraw" or old.name in new_names:
                     continue
-
-                # Never treat macOS AppleDouble metadata files as PictureFlow art.
                 if old.name.startswith("._"):
                     ignored_sidecars += 1
                     continue
-
                 try:
                     old.unlink()
                     removed += 1
                 except FileNotFoundError:
-                    # Harmless race: Finder/macOS may already have removed it.
                     pass
-
             print(f"Removed old album .pfraw files: {removed}")
             if ignored_sidecars:
                 print(f"Ignored macOS ._ sidecars       : {ignored_sidecars}")
-
-        for _, _, _, built in generated:
-            shutil.copy2(built, cache / built.name)
 
         print(f"Installed new .pfraw files     : {len(generated)}")
 

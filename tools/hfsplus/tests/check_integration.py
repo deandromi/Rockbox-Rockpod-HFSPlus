@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 parser = argparse.ArgumentParser(description="Host checks only; never produces ARM firmware")
@@ -26,6 +27,27 @@ def run(command, cwd=src):
         raise SystemExit(f"Failed: {shlex.join(map(str, command))}")
     return p.stdout + p.stderr
 
+
+if sys.platform == "darwin":
+    # Apple Clang does not accept the Linux PIE flags, and the full ARM
+    # freestanding firmware headers cannot be compiled against Mach-O.  Run a
+    # native host build of the real adapter instead.  Linux/GCC keeps the
+    # stricter freestanding syntax check below.
+    with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
+        build = Path(tmp)
+        adapter = build / "adapter_host"
+        run(cc + ["-std=gnu99", "-O1", "-g", "-Wall", "-Wextra",
+                  "-Itools/hfsplus/tests/adapter/host/firmware/export",
+                  "-Ifirmware/hfsplus", "-Ifirmware/include",
+                  "tools/hfsplus/tests/adapter_host.c",
+                  "firmware/hfsplus/hfsplus_rb.c",
+                  "firmware/hfsplus/hfsplus_ro.c",
+                  "firmware/hfsplus/hfsplus_partition.c",
+                  "-o", str(adapter)])
+        run(["python3", str(tests / "test_adapter.py"), str(adapter)])
+        print("PASS: macOS host adapter (real hfsplus_rb/ro/partition)", flush=True)
+    print("Host checks passed; no ARM link, emulator, or iPod boot was tested.")
+    raise SystemExit(0)
 
 with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
     build = Path(tmp)
