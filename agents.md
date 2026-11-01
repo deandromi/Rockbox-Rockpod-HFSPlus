@@ -406,6 +406,7 @@ Hard stops:
 | `README.md` | User install/usage |
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
+| `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
 
 ---
 
