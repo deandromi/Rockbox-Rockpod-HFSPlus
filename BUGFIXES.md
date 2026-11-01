@@ -26,9 +26,9 @@ Severity:
 
 ## V1.1 fixed in this release
 
-The following findings were fixed in the V1.1 maintenance branch and are marked **FIXED** below: HFS-001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 014, 021, 022, 025, 047, 048, 069, 075, 082, 083, 084, 087, 090, 094, 102, 103, 104, 106, 108, 109, 112, 113, 114, 116, 117, 118, 120, 123, 124, 125, 126, 127, 129, 130, 131, 133.
+The following findings were fixed in the V1.1 maintenance branch and are marked **FIXED** below: HFS-001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 014, 021, 022, 025, 039, 047, 048, 069, 075, 082, 083, 084, 087, 090, 094, 102, 103, 104, 106, 108, 109, 112, 113, 114, 116, 117, 118, 120, 123, 124, 125, 126, 127, 129, 130, 131, 133.
 
-Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, SSZ/EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
+Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
 ## 0. Immediate blockers (fix before any autonomous device install)
 
@@ -68,7 +68,7 @@ Host/build verification for this release: `tools/hfsplus` reader tests (19 reade
 | HFS-034 | S2 | OPEN | Per-volume static HFS state ~733 KiB + caches; four volumes reserve roughly 3 MiB BSS. | Allocate the overlay/state lazily for the mounted volume, or reduce `NUM_VOLUMES` for HFS. |
 | HFS-035 | S2 | OPEN | Global `last_error`/`overlay_diag_*` state is not per-volume. | Move diagnostics into `struct hfs_state`; debug screen uses the current volume. |
 | HFS-038 | S2 | OPEN | Header `generation`/`next_id` are stale after normal use. | Either write a well-defined sync point or remove the fields and document reconstruction. |
-| HFS-039 | S2 | OPEN | No `storage_flush()` at overlay commit points; ATA cache can reorder/lose bitmap→entry→data. | Flush after durable metadata commit; add an explicit sync contract to close/fsync; test power-loss ordering. |
+| HFS-039 | S2 | FIXED | No `storage_flush()` at overlay commit points; ATA cache can reorder/lose bitmap→entry→data. | Flush after durable metadata commit; add an explicit sync contract to close/fsync; test power-loss ordering. |
 | HFS-040 | S2 | OPEN | No checksum/sequence/backup header; magic mismatch triggers destructive fresh init. | Add a checksummed format version with a backup header and non-destructive recovery; never auto-zero on magic mismatch. |
 | HFS-041 | S2 | OPEN | Parent-child relationships/orphans are not validated at load. | Validate parents in `overlay_validate()`; reject orphan/cycle/entry-under-file states. |
 | HFS-067 | S2 | OPEN | Overlay-full returns `HFS_RO_BUFFER` (-9); file layer maps only `FAT_RC_ENOSPC` (-10) to ENOSPC, so users see EIO. Confirmed at 2,048 entries. The same mapping gap affects `hfsplus_remove()` tombstones, `hfsplus_rename()` shadows and `hfsplus_closewrite()` capacity growth. | Map `HFS_RO_BUFFER` to `FAT_RC_ENOSPC`/ENOSPC in create/write/close/remove/rename; add distinct “entry table full” diagnostics. |
