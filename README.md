@@ -218,10 +218,10 @@ Run the database tool **from the iPod root**, not with a music-directory argumen
 ```sh
 backup="$HOME/Documents/rockpod-backups/database"
 mkdir -p "$backup"
-# Use an absolute path. Built-from-source example:
-database_tool="$HOME/Developer/Rockpod-HFSPlus/build-ipod6g-database/database.ipod6g"
-# Or the release asset:
-# database_tool="$HOME/Downloads/rockpod-v2.0/database.ipod6g"
+# Use an absolute path. Examples:
+# built from source:  /path/to/source/build-ipod6g-database/database.ipod6g
+# release asset:      /path/to/rockpod-v2.0/database.ipod6g
+database_tool="/absolute/path/to/database.ipod6g"
 cd "/Volumes/IPOD"
 test -d .rockbox
 test -x "$database_tool"
