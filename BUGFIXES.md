@@ -31,6 +31,19 @@ The following findings were fixed in the V1.1 maintenance branch and are marked 
 
 Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
+## V2.1 hotfix
+
+V2.1 is a compatibility and startup hotfix on top of V2.0. It does not change the audit status: 103 findings remain fixed and six remain documented limits.
+
+- Legacy `USED|DELETED`/duplicate live names created by older firmware no longer make the whole overlay fail at stage 11. The newest entry is kept and older duplicates are hidden in RAM; their data is not deleted.
+- Duplicate BASE/tombstone entries are resolved the same way.
+- `next_id` includes shadowed IDs so a new ID cannot collide with a hidden legacy entry.
+- The overlay entry table is read in 96-entry chunks instead of one 320-byte request per slot, reducing mount time.
+- The bootloader skips the full directory/CNID index build; it only needs the firmware path. This is the main power-on speed fix.
+- Host adapter coverage is now 16 tests.
+
+Hardware status: V2.0 was installed on the test iPod and the duplicate-name overlay failure was reproduced. V2.1 is host/build-verified; the final boot/theme acceptance still needs confirmation on the device.
+
 ## V2.0 fixed in this release
 
 V2.0 addresses every remaining finding tracked after V1.1. The implementation adds native HFS+ allocation/metadata validation, alternate-volume-header recovery, overlay ownership/checksum/backup and per-volume diagnostics, ENOSPC mapping, a committed host adapter harness, timestamp exposure, partition-probe hardening, PictureFlow index/config durability, and the remaining adapter/app bounds checks.

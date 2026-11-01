@@ -1,6 +1,6 @@
 # Rockpod HFS+
 
-**Stable V2.0 // Version V12.2**
+**Stable V2.1 // Version V12.3**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
@@ -20,9 +20,9 @@ FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as o
 | Safe transfer mode | **Apple Disk Mode** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max |
 | Install platform | macOS |
-| Release | [V2.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2.0) |
+| Release | [V2.1](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2.1) |
 
-V2.0 resolves all remaining audit findings; six are documented format limits. See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v2.0.md`](docs/release-v2.0.md).
+V2.0 resolved all remaining audit findings. V2.1 fixes legacy duplicate-overlay handling and boot-time indexing; six findings remain documented format limits. See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v2.1.md`](docs/release-v2.1.md).
 
 ## Compatibility and limits
 
@@ -103,10 +103,10 @@ First verify the image:
 shasum -a 256 bootloader-ipod6g.ipod
 ```
 
-Expected V2.0 hash:
+Expected V2.1 hash:
 
 ```text
-beeffd5ed8ad09ab4b52083a49b3d7a9f9d4d1329b440887bd333f69f1409855
+2277257c9fce97a60fe5afdea45b56edccaa2b181cf7b9858cffe6023f248d29
 ```
 
 Eject the volume before DFU. Keep the USB cable connected.
@@ -403,7 +403,7 @@ make -C tools/hfsplus sanitize
 python3 tools/hfsplus/tests/check_integration.py
 ```
 
-V2.0 passes 19 reader tests, 7 partition tests and 15 adapter tests, including ASan/UBSan. Firmware, bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build successfully. The release hashes are in [`docs/release-v2.0.md`](docs/release-v2.0.md).
+V2.1 passes 19 reader tests, 7 partition tests and 16 adapter tests, including ASan/UBSan. Firmware, bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build successfully. The release hashes are in [`docs/release-v2.1.md`](docs/release-v2.1.md).
 
 ## License and credits
 
