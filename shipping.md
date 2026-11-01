@@ -651,7 +651,7 @@ Firmware installation does not require a bootloader reinstall on every update. T
 
 ### 11.2 Pause Apple device helpers
 
-Use the monitor script from `README.md` §“Bootloader installation” verbatim. It pauses `AMPDevicesAgent`, `AMPDeviceDiscoveryAgent`, `com.apple.amp.devicesui` and `iTunesHelper` with `SIGSTOP`, and resumes them with `SIGCONT` when stopped with Control-C. Do not close the window without stopping the monitor; that can leave helpers paused.
+Use the monitor script from `README.md` installation step 3, “Stop Apple device helpers and install the bootloader”, verbatim. It pauses `AMPDevicesAgent`, `AMPDeviceDiscoveryAgent`, `com.apple.amp.devicesui` and `iTunesHelper` with `SIGSTOP`, and resumes them with `SIGCONT` when stopped with Control-C. Do not close the window without stopping the monitor; that can leave helpers paused.
 
 ### 11.3 Enter DFU and verify
 

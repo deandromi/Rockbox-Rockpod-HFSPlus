@@ -64,9 +64,11 @@ fi
 
 `mkfile` must finish successfully. Do not use a sparse file.
 
-### 3. Install the bootloader (first install or bootloader update)
+### 3. Stop Apple device helpers and install the bootloader
 
 The bootloader lives in NOR flash and is separate from `.rockbox`. A firmware-only update does not replace it.
+
+First verify the image:
 
 ```sh
 shasum -a 256 bootloader-ipod6g.ipod
@@ -78,21 +80,80 @@ Expected V2.0 hash:
 beeffd5ed8ad09ab4b52083a49b3d7a9f9d4d1329b440887bd333f69f1409855
 ```
 
-Eject the volume, stop Apple device helpers, then scan for DFU:
+Eject the volume before DFU. Keep the USB cable connected.
+
+**Terminal 1 — Apple-device monitor.** Run this in a separate window and leave it open. It pauses the Apple helpers that would otherwise claim the iPod during DFU, and resumes them when you press **Control-C**.
+
+```sh
+python3 - <<'PYMONITOR'
+import os
+import signal
+import subprocess
+import time
+
+names = {
+    "AMPDevicesAgent", "AMPDeviceDiscoveryAgent",
+    "com.apple.amp.devicesui", "iTunesHelper",
+}
+paused = {}
+
+def processes():
+    output = subprocess.check_output(
+        ["ps", "-u", str(os.getuid()), "-o", "pid=,stat=,comm="], text=True,
+    )
+    result = {}
+    for line in output.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3:
+            pid, state, command = parts
+            result[int(pid)] = (state, os.path.basename(command))
+    return result
+
+def stop_monitor(signum, frame):
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGTERM, stop_monitor)
+print("Apple-device monitor active. Stop with Control-C.", flush=True)
+try:
+    while True:
+        for pid, (state, name) in processes().items():
+            if name in names and "T" not in state:
+                paused[pid] = name
+                try:
+                    os.kill(pid, signal.SIGSTOP)
+                    print(f"Paused: {name} ({pid})", flush=True)
+                except (ProcessLookupError, PermissionError):
+                    paused.pop(pid, None)
+        time.sleep(0.25)
+except KeyboardInterrupt:
+    pass
+finally:
+    current = processes()
+    for pid, name in paused.items():
+        if current.get(pid, (None, None))[1] == name:
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except (ProcessLookupError, PermissionError):
+                pass
+    print("Monitor stopped; paused helpers resumed.")
+PYMONITOR
+```
+
+Do not close this window without stopping it with **Control-C**.
+
+**Terminal 2 — DFU scanner and install.** Put the iPod into DFU by holding **Menu + Select** for about 12 seconds, releasing at the black screen:
 
 ```sh
 ./mks5lboot --dfuscan --loop 1
 ```
 
-Hold **Menu + Select** for about 12 seconds, release at the black screen, and keep the cable connected. Stop the scanner with **Control-C** once DFU is detected. The Apple-device monitor and full DFU procedure are in [`shipping.md`](shipping.md).
-
-Install and let the iPod reboot:
+The scanner must report a DFU device. Stop the scanner with **Control-C**, then install:
 
 ```sh
 ./mks5lboot --bl-inst bootloader-ipod6g.ipod
 ```
 
-Do **not** add `--single`; that removes the Apple NOR boot path.
+Do **not** add `--single`; that removes the Apple NOR boot path. After the success tone and reboot, stop the Apple-device monitor with **Control-C**. The full DFU procedure and troubleshooting are in [`shipping.md`](shipping.md).
 
 ### 4. Install the firmware
 
@@ -106,47 +167,75 @@ diskutil eject "/Volumes/IPOD"
 
 `rockbox.zip` contains the complete `.rockbox` tree and must be extracted, not just `rockbox.ipod`.
 
-### 5. First boot
+### 5. Build the Rockbox database on the Mac (mandatory)
 
-1. Rockpod starts normally.
-2. Open **Debug → Disk Info** and confirm:
-   ```text
-   HFS+ overlay: READY
-   Overlay stage: 9
-   Overlay error: 0
-   ```
-3. Select a theme, wait for disk idle, power off through the Rockbox menu, and boot again. The theme should persist.
-4. Test playback through **Database** and Cover Flow.
+Database, Cover Flow and normal playback depend on the `.rockbox/database_*.tcd` files. Build them on the Mac. **Do not use on-device Database Initialize/Update.**
 
-## Updating
-
-A firmware-only update is:
-
-```sh
-unzip -o rockbox.zip -d "/Volumes/IPOD"
-sync
-diskutil eject "/Volumes/IPOD"
-```
-
-Install a new bootloader only when the release notes say so. Use Apple Disk Mode, never Rockbox USB mode.
-
-## Music and Cover Flow
-
-Use ordinary album folders:
+Store music in ordinary album folders:
 
 ```text
 /Music/Artist/Year - Album/track.m4a
 /Music/Artist/Year - Album/cover.jpg
 ```
 
-Build the Rockbox database on the Mac. Run this from the iPod root, not with a music-directory argument:
+Use the release `database.ipod6g` asset, or build the host tool from the source checkout:
 
 ```sh
-cd "/Volumes/IPOD"
-caffeinate -i /path/to/database.ipod6g
+tools/rockpod/build-database-macos.sh
 ```
 
-Then generate and install the PictureFlow index and artwork:
+Mount the iPod in Apple Disk Mode, then back up the native database files and check that the overlay is not hiding them. Run this from the source checkout:
+
+```sh
+backup="$HOME/Documents/rockpod-backups/database"
+mkdir -p "$backup"
+cd "/Volumes/IPOD"
+cp .rockbox/database*.tcd "$backup"/ 2>/dev/null || true
+
+cd "/path/to/Rockpod-HFSPlus"
+python3 - <<'PYOVERLAY'
+from pathlib import Path
+import sys
+sys.path.insert(0, "tools/rockpod")
+import overlay_check
+
+names = {"database_idx.tcd", "database_1.tcd", "database_7.tcd",
+         "database_8.tcd", "database_tmp.tcd"}
+conflicts = overlay_check.conflicts(Path("/Volumes/IPOD/.rockpod-rw"), names)
+if conflicts:
+    for entry in conflicts:
+        print(f"overlay slot {entry['slot']}: {entry['name']}")
+    raise SystemExit("STOP: resolve overlay database conflicts before building")
+print("No database overlay conflicts.")
+PYOVERLAY
+```
+
+If the check stops, do not continue. Resolve the reported overlay entries using [`shipping.md`](shipping.md); do not delete `.rockpod-rw`.
+
+Run the database tool **from the iPod root**, not with a music-directory argument. Keep the Mac awake:
+
+```sh
+backup="$HOME/Documents/rockpod-backups/database"
+mkdir -p "$backup"
+database_tool="/path/to/database.ipod6g"
+cd "/Volumes/IPOD"
+test -d .rockbox
+test -x "$database_tool"
+set -o pipefail
+caffeinate -i "$database_tool" 2>&1 | tee "$backup/database-build.log"
+```
+
+Wait for the tool to finish and commit the database. Do not interrupt a database write. Then:
+
+```sh
+sync
+```
+
+### 6. Optional: Cover Flow index and artwork
+
+Skip this section if you do not use Cover Flow. The index generator requires a committed native database from step 5; the artwork generator requires `cover.jpg` files and FFmpeg.
+
+From the source checkout:
 
 ```sh
 python3 tools/rockpod/build_rockpod_coverflow_index.py \
@@ -159,6 +248,8 @@ python3 tools/rockpod/build_rockpod_pictureflow_cache.py \
   --cache "/Volumes/IPOD/.rockbox/rocks/demos/pictureflow"
 ```
 
+The index script backs up the native index/config files, validates the overlay and refuses to install if a shadow or tombstone could hide the replacements. The artwork script builds all covers first and keeps old files on failure. Detailed conflict handling is in [`shipping.md`](shipping.md).
+
 Finish with:
 
 ```sh
@@ -166,7 +257,29 @@ sync
 diskutil eject "/Volumes/IPOD"
 ```
 
-Keep **Auto Update** off. Rebuild the database and matching index/cache on the Mac after adding music. Detailed backup and overlay-conflict checks are in [`shipping.md`](shipping.md).
+### 7. First boot
+
+1. Rockpod starts normally.
+2. Open **Debug → Disk Info** and confirm:
+   ```text
+   HFS+ overlay: READY
+   Overlay stage: 9
+   Overlay error: 0
+   ```
+3. Select a theme, wait for disk idle, power off through the Rockbox menu, and boot again. The theme should persist.
+4. Confirm **Database** playback and, if installed, Cover Flow.
+
+## Updating
+
+A firmware-only update is:
+
+```sh
+unzip -o rockbox.zip -d "/Volumes/IPOD"
+sync
+diskutil eject "/Volumes/IPOD"
+```
+
+Install a new bootloader only when the release notes say so. After adding or retagging music, repeat the mandatory database step and, if used, the optional Cover Flow step. Use Apple Disk Mode, never Rockbox USB mode.
 
 ## Recovery
 
