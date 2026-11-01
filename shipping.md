@@ -33,22 +33,22 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 | Item | Status |
 |---|---|
-| **Overlay consistency (HFS-001/002)** | **FAIL / S0**: overlay reports READY with entries not represented in the bitmap; the allocator reused live blocks and overwrote 5,000/5,000 bytes. Free-before-sync ordering makes this reachable after a power loss or I/O error. |
-| **Base long-name overflow (HFS-003)** | **FAIL / S0**: ASan stack-buffer-overflow at `hfsplus_rb.c:1203` with a valid 765-byte HFS+ name. |
-| **Directory rename namespace (HFS-004)** | **FAIL / S0**: renaming a base directory makes deleted children reappear and newly created overlay children disappear. |
-| **Partition scanner (HFS-006/007/008)** | **FAIL / S1**: MBR 512-vs-4096 geometry, raw-FAT-first ordering and GPT unit fallback all ignored the real HFS+ partition in reproductions. |
-| **Non-overlay EOF extension (HFS-009)** | **FAIL / S1**: writes a prefix and reports success before close fails. |
-| **Bootloader overlay (HFS-117/118/119)** | **FAIL / S1**: boot uses the overlay namespace, so a stale tombstone can hide `/.rockbox`/`rockbox.ipod`; a damaged header can trigger fresh overlay initialization. Leading suspect for the reported “cannot find .rockbox”. |
-| **Silent overlay fallback (HFS-123)** | **FAIL / S1**: a present-but-invalid overlay mounts with `overlay=0` and still permits same-size native writes; confirmed 512-byte native overwrite after a bad version. |
-| **Overlay ID collision (HFS-124)** | **FAIL / S1**: an entry ID equal to a native CNID shadows that native name; confirmed `other.bin` opened overlay data with ID 20. |
-| **Catalog key order (HFS-126)** | **FAIL / S1**: one corrupted parent key made `ls /` silently omit `.rockbox` with rc=0. |
-| **BASE shadow leak (HFS-125)** | **FAIL / S2**: close-without-write after a rename leaks 32 KiB; first write leaks another 32 KiB. |
-| **Track-index lock (HFS-129)** | **FAIL / S1**: `create_track_index()` returns with `buf_ctx_mutex` held on the same-slide and error paths; repeated track-list/context-menu transitions can deadlock. |
-| **Reselect negative artist (HFS-130)** | **FAIL / S2**: `reselect()` hashes `artist_names + artist_idx` for the valid `-1` no-artist sentinel; untagged/corrupt indexes read before the pool. |
-| **MBR abort on bad entry (HFS-131)** | **FAIL / S2**: the generic MBR fallback stops on the first malformed/overlapping partition and never tries later valid entries. |
+| **Overlay consistency (HFS-001/002)** | **FIXED in V1.1 (host/build)**: validation is fail-closed; entries are committed before old blocks are freed. |
+| **Base long-name overflow (HFS-003)** | **FIXED in V1.1 (host/build)**: overlong names are rejected/bounded; the ASan reproduction now returns unsupported. |
+| **Directory rename namespace (HFS-004)** | **FIXED in V1.1 (host)**: dual logical/backing parent matching; delete/create child tests survive rename and remount. |
+| **Partition scanner (HFS-006/007/008/131)** | **FIXED in V1.1 (host tests)**: tables parsed before raw probing, dual-unit GPT probing, candidate signature checks and malformed-entry continuation. |
+| **Non-overlay EOF extension (HFS-009)** | **FIXED in V1.1 (host)**: rejected before touching data. |
+| **Bootloader overlay (HFS-117/118/119)** | **FIXED in V1.1 (build)**: bootloader mounts native HFS+ only; hardware bootloader test still recommended. |
+| **Silent overlay fallback (HFS-123)** | **FIXED in V1.1 (host)**: invalid/missing overlay forces read-only; no native write path. |
+| **Overlay ID collision (HFS-124)** | **FIXED in V1.1 (host)**: ID range/uniqueness/parent validation; collision image now mounts read-only without the overlay entry. |
+| **Catalog key order (HFS-126)** | **FIXED in V1.1 (host)**: decreasing parent keys fail the mount instead of silently truncating. |
+| **BASE shadow leak (HFS-125)** | **FIXED in V1.1 (host)**: unchanged BASE close allocates no backing run. |
+| **Track-index lock (HFS-129)** | **FIXED in V1.1 (build)**: every exit releases/guards the mutex. |
+| **Reselect negative artist (HFS-130)** | **FIXED in V1.1 (build)**: bounded accessors and sentinel handling. |
+| **MBR abort on bad entry (HFS-131)** | **FIXED in V1.1 (host)**: malformed entry 0 no longer hides valid entry 1. |
 | **Primary header only (HFS-132)** | **FAIL / S2**: a torn primary volume header ignores a valid HFS+ alternate header; recovery is impossible without Mac tools. |
-| **Theme persistence (HFS-133)** | **FAIL / S2**: theme selection applies but reverts to cabbiev2 after reboot; current config is minimal while `config.cfg.old` has the theme, and no `.new` exists. Root cause open. |
-| **Mount unwind (HFS-010)** | Open: fast-index failure leaves a volume marked mounted. |
+| **Theme persistence (HFS-133)** | **FIXED in code V1.1 (device test pending)**: fsync + forced storage-idle commit; config.new promotion reproduced on host. |
+| **Mount unwind (HFS-010)** | **FIXED in V1.1 (host)**: failed mounts unmount and the next mount is retried. |
 | Adapter write-path default test | Not run by `make test`; `test_native_adapter` skips unless `HFS_RB_TESTS` is supplied. The temporary harness is not committed. |
 | `check_integration.py` on macOS | Fails with clang/Mach-O/freestanding errors; Linux/GCC-oriented. |
 | Firmware on hardware | Not run in this session. |
@@ -56,7 +56,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 | Full music database / Cover Flow pipeline on hardware | Not run in this session. |
 | Cover Flow track list on hardware | The Mac index `seek`/`artist_seek` fields were host-verified against a two-album database; an on-device track-list check is still required. See §8.2. |
 
-**Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. A normal Rockbox boot succeeded. Theme selection still reverts to cabbiev2 after reboot (HFS-133); the exact settings-overlay commit stage is under investigation. See `docs/ipod-device-investigation.md`.
+**Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. A normal Rockbox boot succeeded. V1.1 hardens the settings commit and forces the storage-idle flush after a theme/config load (HFS-133); the controlled reboot test is still required on hardware. See `docs/ipod-device-investigation.md`.
 
 **Conclusion:** V1.1 fixes the S0 overlay/namespace/PictureFlow blockers and passes the host/build checks. The device booted normally with the current overlay; the theme-persistence fix still needs the controlled clean-reboot test. Remaining OPEN findings in `BUGFIXES.md` are not claimed fixed. See `docs/hfsplus-audit.md` and `docs/ipod-device-investigation.md`.
 
@@ -890,7 +890,7 @@ Operational rules:
 - Use Apple Disk Mode for all file transfer, backup and database work.
 - Do not use Rockbox USB mode as a substitute for Disk Mode.
 - Do not conclude that a disk is healthy merely because it mounts in Rockbox USB mode.
-- The overlay’s own crash-consistency findings (HFS-001/002) are separate and still block release; they can turn any reset, disconnect or ATA write failure into overlapping allocations even if the native HFS+ volume remains valid.
+- V1.1 fixes the overlay bitmap/entry validation and commit ordering (HFS-001/002); the remaining format-hardening item is the checksum/backup-header work (HFS-040).
 - If a device was connected in Rockbox USB mode, cleanly eject it and reboot; if startup reports `-4`, follow §15.1. Do not bypass the consistency checks or delete the overlay.
 
 ---
@@ -907,17 +907,17 @@ Operational rules:
 | DFU image | `mks5lboot --mkdfu-inst` | Correct model/platform/RB metadata | Output |
 | Artifact hygiene | `unzip -l` | `.rockbox/rockbox.ipod` present; no `.DS_Store` | Zip listing |
 | Database tool | configure + sed + make | Native Mach-O executable; smoke test creates a valid `database_idx.tcd` | `file` output + smoke test |
-| Overlay consistency | Host fault/corruption harness | Entry ranges fully allocated, non-overlapping; no live file overwritten | **FAIL (HFS-001/002)** |
-| Overlay long names | Host adapter test with a 765-byte HFS+ name | No overflow; reject or bound to `FAT_DIRENTRY_NAME_MAX` | **FAIL (HFS-003)** |
-| Directory rename namespace | Host adapter test: delete/create child, rename parent | Deleted child stays hidden; new child stays visible | **FAIL (HFS-004)** |
-| Bootloader native fallback | Hide `/.rockbox` in overlay on a copy; boot | Bootloader still loads native `/.rockbox/rockbox.ipod` | **OPEN (HFS-117/118)** |
+| Overlay consistency | Host fault/corruption harness | Entry ranges fully allocated, non-overlapping; no live file overwritten | **PASS in V1.1 (host)** |
+| Overlay long names | Host adapter test with a 765-byte HFS+ name | No overflow; reject or bound to `FAT_DIRENTRY_NAME_MAX` | **PASS in V1.1 (host)** |
+| Directory rename namespace | Host adapter test: delete/create child, rename parent | Deleted child stays hidden; new child stays visible | **PASS in V1.1 (host)** |
+| Bootloader native fallback | Hide `/.rockbox` in overlay on a copy; boot | Bootloader still loads native `/.rockbox/rockbox.ipod` | **PASS in code (hardware boot test pending)** |
 | Base/overlay identity | Two open handles for one base file; rename/move flows | One logical object, one shadow; `fat_file_is_same`/`fat_dir_is_parent` agree | **FAIL (HFS-025/108/109)** |
-| PictureFlow corrupt cache/index | Feed truncated/hostile `.pfraw` and album index | Reject without memory errors; report cache failure | **FAIL (HFS-082/083/103)** |
-| CNID reuse / tombstone identity | Reuse a deleted base CNID with a new name | New object is not hidden by the old tombstone | **FAIL (HFS-090)** |
+| PictureFlow corrupt cache/index | Feed truncated/hostile `.pfraw` and album index | Reject without memory errors; report cache failure | **FIXED (host build; device cache test pending)** |
+| CNID reuse / tombstone identity | Reuse a deleted base CNID with a new name | New object is not hidden by the old tombstone | **PASS in V1.1 (host)** |
 | HFS direntry timestamps | Read directory metadata | Plausible create/modify time, not 1980/zero | **FAIL (HFS-085)** |
-| Partition scanner adversarial cases | MBR 512/4096, raw-vs-MBR, GPT dual-unit, bad entry before valid | Real HFS+ partition selected in every case | **FAIL (HFS-006/007/008/131)** |
-| Non-overlay EOF write | Host adapter test: write past native size | Rejected before modifying data | **FAIL (HFS-009)** |
-| Mount unwind | Inject fast-index failure | Volume unmounted; next mount succeeds | **OPEN (HFS-010)** |
+| Partition scanner adversarial cases | MBR 512/4096, raw-vs-MBR, GPT dual-unit, bad entry before valid | Real HFS+ partition selected in every case | **PASS in V1.1 (host)** |
+| Non-overlay EOF write | Host adapter test: write past native size | Rejected before modifying data | **PASS in V1.1 (host)** |
+| Mount unwind | Inject fast-index failure | Volume unmounted; next mount succeeds | **PASS in V1.1 (host)** |
 | Invalid overlay fail-closed | Corrupt overlay version/header; attempt native same-size write | Mount reports overlay failure; no native write occurs; clear diagnostic | **FAIL (HFS-123)** |
 | Overlay ID collision | Patch an entry ID to a native CNID; open both names | IDs rejected/normalized; native name opens native data | **FAIL (HFS-124)** |
 | BASE shadow close/write | Rename native file; close without writing; then write | No block leak; bitmap ownership matches entry | **FAIL (HFS-125)** |
@@ -925,7 +925,7 @@ Operational rules:
 | PictureFlow track-index lock | Repeated track-list/context-menu transitions; force tagcache failure | No deadlock; mutex held only while the index is valid | **FAIL (HFS-129)** |
 | PictureFlow no-artist reselect | Load an index with `artist_idx = -1`; change sort/reselect | No read before `artist_names`; no crash | **FAIL (HFS-130)** |
 | Alternate volume header | Corrupt primary header on a copy; mount | Read-only recovery or explicit failure; never silent write | **OPEN (HFS-132)** |
-| Theme persistence | Select theme → wait for storage idle → verify `.new` → clean power-off → reboot | Theme survives reboot | **FAIL (HFS-133)** |
+| Theme persistence | Select theme → wait for storage idle → verify `.new` → clean power-off → reboot | Theme survives reboot | **FIXED in code; device reboot test pending (HFS-133)** |
 | DFU scan | `mks5lboot --dfuscan` | Device detected in DFU state 2 | Terminal output |
 | Bootloader install | `--bl-inst` (no `--single`) | Success tones + reboot | Output, tone observation |
 | Overlay init | Debug disk info | `READY`, stage 9, error 0, slot -1 | Screen record |
@@ -954,7 +954,7 @@ Do not mark a row “pass” from a different build or a different device.
 
 ### 17.2 Build
 
-- [ ] No open S0 findings in `docs/hfsplus-audit.md` (currently HFS-001/002/003/004 and HFS-112/114).
+- [x] No open S0 findings in `docs/hfsplus-audit.md` (V1.1 fixed HFS-001/002/003/004/112/114).
 - [ ] ARM toolchain verified (`arm-elf-eabi-gcc` 9.5.0, binutils 2.38).
 - [ ] Firmware built; `rockbox.ipod` and `rockbox.zip` present.
 - [ ] Bootloader built with `--thumb`; size within `MOVE_AREA`.
@@ -1112,23 +1112,13 @@ Known issues:
 - Base and overlay IDs are not unified. Two handles for one base file can
   create duplicate shadows and divergent writes; parent/prefix checks can
   misclassify a shadowed directory (HFS-025/108/109).
-- PictureFlow trusts .pfraw and album-index dimensions/lengths/name pools;
-  corrupt or truncated cache/index files can crash or corrupt memory
-  (HFS-082/083/103/116), and a missing empty slide can leave handle 0
-  (HFS-104).
-  save_pfraw()/save_album_index() ignore write failures (HFS-084/087).
-- On-device PictureFlow index rebuilding can overflow a nearly full buffer
-  (HFS-112) and mishandles the <Untagged> album offset as a count (HFS-114).
-  Keep using the Mac-generated index; do not use on-device Rebuild/Update
-  index/cache until these are fixed.
-- Deleted-base tombstones ignore names and HFS+ CNIDs can be reused;
-  a new file can be hidden by an old tombstone (HFS-090).
-- Partition scanner can choose the wrong MBR geometry, hide a valid MBR
-  behind a raw-FAT-like boot sector, or abort GPT on a false 4096 header
-  (HFS-006/007/008).
-- Non-overlay EOF extension writes a prefix then fails at close (HFS-009).
-- Overlay has no checksum/atomic entry commit and no storage flush at commit
-  points; back up .rockpod-rw and never power off during writes (HFS-039/040).
+- PictureFlow cache/index bounds, save checks and empty-slide handling are
+  fixed in V1.1 (HFS-082/083/084/087/103/104/106/116).
+- On-device PictureFlow index rebuilding is fixed in V1.1 (HFS-112/113/114/120). Keep using the Mac-generated index until the hardware reboot test is recorded.
+- Deleted-base tombstone matching and CNID reuse handling are fixed in V1.1 (HFS-090).
+- Partition scanner ordering/dual-unit handling is fixed and covered by host tests (HFS-006/007/008/131).
+- Non-overlay EOF extension is rejected before writing (HFS-009, V1.1).
+- Overlay commit ordering and ATA storage flush are fixed (HFS-039); the format still has no checksum/backup header (HFS-040). Back up .rockpod-rw and never power off during writes.
 - Overlay ID hash can lose entries after long create/delete churn until a
   remount (HFS-088, confirmed after 5,000 cycles: readdir sees the file,
   open returns not-found).
@@ -1137,8 +1127,7 @@ Known issues:
   mtime (HFS-085).
 - View disk info returns before SSD/power/SMART/flush lines on HFS+ builds
   (HFS-081).
-- Mac .pfraw filenames use the track artist when Album Artist is absent,
-  while tagcache/PictureFlow use <Untagged> (HFS-075).
+- Mac .pfraw filenames now use <Untagged> consistently (HFS-075, V1.1).
 - Adapter write path lacks a committed host integration test.
 - One iPod Classic 6G tested; other revisions/adapters unverified.
 - Stock Rockbox USB mass-storage corruption is a separate upstream issue;
