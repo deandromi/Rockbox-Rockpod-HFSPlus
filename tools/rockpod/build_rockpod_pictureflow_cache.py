@@ -77,14 +77,13 @@ def get_tags(track: Path) -> tuple[str, str]:
     album = tags.get("album", "").strip()
     album_artist = tags.get("album_artist", "").strip()
 
-    # Rockbox commonly falls back to track artist when album artist is unavailable.
+    # Tagcache stores the literal <Untagged> value when Album Artist is
+    # absent; PictureFlow hashes that value, not a track-artist fallback.
     if not album_artist:
-        album_artist = tags.get("artist", "").strip()
+        album_artist = "<Untagged>"
 
     if not album:
         raise ValueError("missing album tag")
-    if not album_artist:
-        raise ValueError("missing album_artist/artist tag")
 
     return album, album_artist
 

@@ -82,7 +82,7 @@ static int apm(hfs_ro_read_fn read, void *ctx, uint64_t size, uint32_t sector,
     uint32_t entries = be32(b + 4);
     if (!entries || entries > 4096 || (uint64_t)(entries + 1) * unit > size)
         return HFS_RO_FORMAT;
-    int count = 0;
+    int count = 0, first_error = 0;
     for (uint32_t i = 1; i <= entries; ++i) {
         rc = bounded(read, ctx, size, (uint64_t)i * unit, b, sizeof(b));
         if (rc)
@@ -90,15 +90,26 @@ static int apm(hfs_ro_read_fn read, void *ctx, uint64_t size, uint32_t sector,
         if (be16(b) != 0x504d || be32(b + 4) != entries)
             return HFS_RO_FORMAT;
         if (!memcmp(b + 48, "Apple_HFS", 10)) {
-            if (!be32(b + 8))
-                return HFS_RO_FORMAT;
-            count = add(parts, cap, count, size, sector, be32(b + 8),
-                         be32(b + 12), unit, 0xaf);
-            if (count < 0)
-                return count;
+            if (!be32(b + 8) || !be32(b + 12)) {
+                if (!first_error)
+                    first_error = HFS_RO_FORMAT;
+                continue;
+            }
+            int next = add(parts, cap, count, size, sector, be32(b + 8),
+                           be32(b + 12), unit, 0xaf);
+            if (next < 0) {
+                if (next == HFS_RO_BUFFER)
+                    return next;
+                if (!first_error)
+                    first_error = next;
+                continue;
+            }
+            count = next;
         }
     }
-    return count;
+    if (count > 0)
+        return count;
+    return first_error;
 }
 
 static int gpt(hfs_ro_read_fn read, void *ctx, uint64_t size, uint32_t sector,
@@ -140,7 +151,7 @@ static int gpt(hfs_ro_read_fn read, void *ctx, uint64_t size, uint32_t sector,
     }
     if (~value != table_crc)
         return HFS_RO_FORMAT;
-    int count = 0;
+    int count = 0, first_error = 0;
     for (uint32_t i = 0; i < entries; ++i) {
         rc = bounded(read, ctx, size, table * unit + (uint64_t)i * es, b, es);
         if (rc)
@@ -150,14 +161,25 @@ static int gpt(hfs_ro_read_fn read, void *ctx, uint64_t size, uint32_t sector,
         if (!type)
             continue;
         uint64_t begin = le64(b + 32), end = le64(b + 40);
-        if (begin < first || begin > end || end > last)
-            return HFS_RO_FORMAT;
-        count = add(parts, cap, count, size, sector, begin, end - begin + 1,
-                     unit, (uint8_t)type);
-        if (count < 0)
-            return count;
+        if (begin < first || begin > end || end > last) {
+            if (!first_error)
+                first_error = HFS_RO_FORMAT;
+            continue;
+        }
+        int next = add(parts, cap, count, size, sector, begin,
+                       end - begin + 1, unit, (uint8_t)type);
+        if (next < 0) {
+            if (next == HFS_RO_BUFFER)
+                return next;
+            if (!first_error)
+                first_error = next;
+            continue;
+        }
+        count = next;
     }
-    return count;
+    if (count > 0)
+        return count;
+    return first_error;
 }
 
 int hfs_partition_scan(hfs_ro_read_fn read, void *ctx, uint64_t size,
@@ -177,69 +199,84 @@ int hfs_partition_scan(hfs_ro_read_fn read, void *ctx, uint64_t size,
             return HFS_RO_UNSUPPORTED;
         return apm(read, ctx, size, sector, unit, parts, cap);
     }
-    /* iPod Classic exposes 4 KiB virtual partition-table units even when
-     * the ATA layer reports 512-byte logical sectors.  Try 4096 first so
-     * an accidental plausible signature at the 512-byte interpretation
-     * cannot shadow the real iPod partition.  The reported sector size
-     * remains the fallback for ordinary disks. */
-    uint32_t units[2] = { 4096, sector };
-    int raw = probe(read, ctx, size, 0, size);
-    if (raw)
-        return add(parts, cap, 0, size, sector, 0, size / sector, sector, (uint8_t)raw);
-    if (mbr[510] != 0x55 || mbr[511] != 0xaa)
-        return apm(read, ctx, size, sector, 512, parts, cap);
-    int protective = 0;
-    for (unsigned int i = 0; i < 4; ++i)
-        protective |= mbr[446 + 16 * i + 4] == 0xee;
-    if (protective) {
-        for (unsigned int u = 0; u < 2; ++u) {
-            rc = gpt(read, ctx, size, sector, units[u], parts, cap);
-            if (rc != HFS_RO_UNSUPPORTED)
-                return rc;
-        }
-        return HFS_RO_UNSUPPORTED;
-    }
-    /* The iPod Classic USB stack writes MBR start/size values in 4096-byte
-     * virtual-sector units.  On the ATA side the filesystem probe can run
-     * before Rockbox has established that virtual-sector multiplier, so a
-     * perfectly valid Apple_HFS entry can fail the byte-level probe even
-     * though its MBR geometry is unambiguous.
-     *
-     * Prefer an explicit Apple_HFS (0xaf) MBR entry interpreted in the
-     * iPod's 4096-byte virtual units.  hfsplus_mount() independently checks
-     * the H+/HX signature and complete volume structure, so accepting the
-     * partition geometry here does not bypass HFS+ validation. */
-    for (unsigned int i = 0; i < 4; ++i) {
-        const uint8_t *p = mbr + 446 + i * 16;
-        uint64_t begin = le32(p + 8), blocks = le32(p + 12);
-        if (p[4] != 0xaf || !begin || !blocks)
-            continue;
-        int count = add(parts, cap, 0, size, sector, begin, blocks, 4096, 0xaf);
-        if (count > 0)
-            return count;
-        if (count != HFS_RO_FORMAT)
-            return count;
-        /* A size-reporting mismatch is still worth falling through to the
-         * generic scanner, which may be able to interpret the device using
-         * its reported logical-sector size. */
-    }
 
-    for (unsigned int u = 0; u < 2; ++u) {
-        int count = 0, found = 0;
+    int table_error = HFS_RO_UNSUPPORTED;
+    int has_mbr = mbr[510] == 0x55 && mbr[511] == 0xaa;
+    if (has_mbr) {
+        int protective = 0;
+        for (unsigned int i = 0; i < 4; ++i)
+            protective |= mbr[446 + 16 * i + 4] == 0xee;
+        if (protective) {
+            /* A false 4096-byte interpretation must not suppress the real
+             * 512-byte GPT.  Try both and only commit to a validated table. */
+            int last = HFS_RO_UNSUPPORTED;
+            uint32_t units[2] = { 4096, sector };
+            for (unsigned int u = 0; u < 2; ++u) {
+                rc = gpt(read, ctx, size, sector, units[u], parts, cap);
+                if (rc >= 0)
+                    return rc;
+                last = rc;
+            }
+            return last;
+        }
+
+        /* Prefer an explicit Apple_HFS entry only when its 4096-byte
+         * interpretation has a real H+/HX signature.  Otherwise let the
+         * generic 512/4096 probe below choose the real geometry. */
         for (unsigned int i = 0; i < 4; ++i) {
             const uint8_t *p = mbr + 446 + i * 16;
             uint64_t begin = le32(p + 8), blocks = le32(p + 12);
-            if (!p[4] || p[4] == 5 || p[4] == 15 || !begin || !blocks)
+            if (p[4] != 0xaf || !begin || !blocks)
                 continue;
-            rc = probe(read, ctx, size, begin * units[u], blocks * units[u]);
-            if (rc)
-                found = 1;
-            count = add(parts, cap, count, size, sector, begin, blocks, units[u], p[4]);
-            if (count < 0)
-                break;
+            uint64_t offset = begin * 4096u;
+            uint64_t length = blocks * 4096u;
+            if (offset >= size || length > size - offset)
+                continue;
+            if (!probe(read, ctx, size, offset, length))
+                continue;
+            int count = add(parts, cap, 0, size, sector, begin, blocks, 4096,
+                            0xaf);
+            if (count > 0)
+                return count;
+            if (count == HFS_RO_BUFFER)
+                return count;
+            /* A malformed first candidate must not hide later entries. */
         }
-        if (count > 0 && found)
-            return count;
+
+        uint32_t units[2] = { 4096, sector };
+        for (unsigned int u = 0; u < 2; ++u) {
+            int count = 0, found = 0;
+            for (unsigned int i = 0; i < 4; ++i) {
+                const uint8_t *p = mbr + 446 + i * 16;
+                uint64_t begin = le32(p + 8), blocks = le32(p + 12);
+                if (!p[4] || p[4] == 5 || p[4] == 15 || !begin || !blocks)
+                    continue;
+                rc = probe(read, ctx, size, begin * units[u],
+                           blocks * units[u]);
+                if (rc)
+                    found = 1;
+                int next = add(parts, cap, count, size, sector, begin, blocks,
+                               units[u], p[4]);
+                if (next < 0) {
+                    if (next == HFS_RO_BUFFER)
+                        return next;
+                    if (table_error == HFS_RO_UNSUPPORTED)
+                        table_error = next;
+                    continue;
+                }
+                count = next;
+            }
+            if (count > 0 && found)
+                return count;
+        }
     }
-    return HFS_RO_UNSUPPORTED;
+
+    /* Only probe a whole-disk raw volume after usable partition tables have
+     * been considered.  This prevents a FAT-like boot sector from hiding a
+     * valid MBR/GPT/APM partition. */
+    int raw = probe(read, ctx, size, 0, size);
+    if (raw)
+        return add(parts, cap, 0, size, sector, 0, size / sector, sector,
+                   (uint8_t)raw);
+    return table_error;
 }

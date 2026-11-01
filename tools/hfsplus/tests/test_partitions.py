@@ -74,6 +74,45 @@ class PartitionTests(unittest.TestCase):
         p = self.run_image(b, "cat", "/.rockbox/rockbox.ipod", options=("--scan",))
         self.assertEqual(p.stdout, b"TEST ONLY!!!")
 
+
+    def test_mbr_partition_table_wins_over_raw_fat_boot_sector(self):
+        b = bytearray(wrapped("mbr", 512))
+        # Make the whole-disk boot sector look like FAT.  The valid MBR HFS+
+        # partition must still win; the raw probe is only a fallback.
+        b[11] = 0
+        b[12] = 2
+        b[13] = 1
+        b[16] = 2
+        b[510:512] = b"\x55\xaa"
+        p = self.run_image(b, "cat", "/.rockbox/rockbox.ipod",
+                           options=("--scan",))
+        self.assertEqual(p.stdout, b"TEST ONLY!!!")
+
+
+    def test_gpt_false_4096_header_falls_back_to_512(self):
+        b = bytearray(wrapped("gpt", 512))
+        table = bytes(b[1024:1024 + 128 * 128])
+        b[1024:1024 + 128 * 128] = bytes(128 * 128)
+        b[8192:8192 + len(table)] = table
+        struct.pack_into("<Q", b, 512 + 72, 16)
+        struct.pack_into("<Q", b, 512 + 40, 64)
+        struct.pack_into("<Q", b, 512 + 48, 2142)
+        b[512 + 16:512 + 20] = b"\0\0\0\0"
+        struct.pack_into("<I", b, 512 + 16, zlib.crc32(b[512:512 + 92]))
+        b[4096:4104] = b"EFI PART"
+        p = self.run_image(b, "cat", "/.rockbox/rockbox.ipod",
+                           options=("--scan",))
+        self.assertEqual(p.stdout, b"TEST ONLY!!!")
+
+    def test_malformed_first_mbr_entry_does_not_hide_second(self):
+        b = bytearray(wrapped("mbr", 512))
+        entry = bytes(b[446:446 + 16])
+        b[446 + 16:446 + 32] = entry
+        struct.pack_into("<I", b, 446 + 8, 0xffffffff)
+        p = self.run_image(b, "cat", "/.rockbox/rockbox.ipod",
+                           options=("--scan",))
+        self.assertEqual(p.stdout, b"TEST ONLY!!!")
+
     def test_partition_checksums_and_bounds(self):
         b = wrapped("gpt")
         b[512 + 16] ^= 1

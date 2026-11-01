@@ -229,7 +229,7 @@ static int build_dir_index(struct hfs_ro_volume *v)
     v->dir_index_count = 0;
     v->dir_index_complete = 1;
     uint32_t node = v->first_leaf, previous = 0, visited = 0, seen = 0;
-    uint32_t last_parent = 0;
+    uint32_t last_parent = 0, previous_parent = 0;
     while (node) {
         if (node >= v->total_nodes || visited++ >= v->total_nodes)
             return HFS_RO_FORMAT;
@@ -255,6 +255,12 @@ static int build_dir_index(struct hfs_ro_volume *v)
             rc = record_parent_kind(record, length, &parent, &kind);
             if (rc)
                 return rc;
+            /* Catalog keys are ordered by parent.  A decreasing parent key
+             * means the leaf chain is not trustworthy; fail the mount rather
+             * than letting indexed iteration stop before later records. */
+            if (parent < previous_parent)
+                return HFS_RO_FORMAT;
+            previous_parent = parent;
             /* Validate the complete record once while building the index. */
             struct hfs_ro_entry validated;
             rc = parse_record(v, record, length, &validated);
@@ -327,7 +333,7 @@ static int read_catalog_header(struct hfs_ro_volume *v)
         v->first_leaf >= v->total_nodes || v->last_leaf >= v->total_nodes ||
         v->catalog.size != (uint64_t)v->total_nodes * size ||
         be32(h + 26) > v->total_nodes || be16(h + 20) != 516 ||
-        (be32(h + 38) & 6u) != 6u || h[36])
+        (be32(h + 38) & 6u) != 6u || h[36] || h[37] != 0xcf)
         return HFS_RO_FORMAT;
     return HFS_RO_OK;
 }

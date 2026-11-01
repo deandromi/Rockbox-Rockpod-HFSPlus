@@ -2135,14 +2135,33 @@ fat_error:
     return rc;
 }
 
+#ifdef HAVE_HFSPLUS_RO
+/* A base object and its overlay shadow have different firstcluster values but
+ * the same logical identity: the native base CNID.  Overlay-only objects have
+ * no backing ID and use their overlay ID. */
+static long hfs_file_identity(const struct fat_file *file)
+{
+    if (file->hfs_backing_id)
+        return (long)file->hfs_backing_id;
+    return file->firstcluster;
+}
+#endif
+
 bool fat_dir_is_parent(const struct fat_file *dir, const struct fat_file *file)
 {
     /* if the directory file's first cluster is the same as the file's
        directory cluster and they're on the same volume, 'dir' is its parent
        directory; the file must also have a dircluster (ie. not removed) */
     long dircluster = file->dircluster;
+#ifdef HAVE_HFSPLUS_RO
+    long identity = hfs_file_identity(dir);
+    return dircluster && (dircluster == dir->firstcluster ||
+                          dircluster == identity)
+            IF_MV( && dir->volume == file->volume );
+#else
     return dircluster && dircluster == dir->firstcluster
             IF_MV( && dir->volume == file->volume );
+#endif
 }
 
 bool fat_file_is_same(const struct fat_file *file1,
@@ -2151,7 +2170,7 @@ bool fat_file_is_same(const struct fat_file *file1,
 #ifdef HAVE_HFSPLUS_RO
     if (fat_is_readonly(file1) || fat_is_readonly(file2))
         return IF_MV_VOL(file1->volume) == IF_MV_VOL(file2->volume) &&
-               file1->firstcluster == file2->firstcluster;
+               hfs_file_identity(file1) == hfs_file_identity(file2);
 #endif
     /* first, triviality */
     if (file1 == file2)
