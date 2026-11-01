@@ -2106,12 +2106,9 @@ static void create_track_index(const int slide_index)
 {
     char tcs_buf[TAGCACHE_BUFSZ];
     const long tcs_bufsz = sizeof(tcs_buf);
-    buf_ctx_lock();
-    if ( slide_index == pf_tracks.cur_idx )
-    {
-        buf_ctx_unlock();
+    if (slide_index == pf_tracks.cur_idx)
         return;
-    }
+    buf_ctx_lock();
 
     if (!rb->tagcache_search(&tcs, tag_title))
         goto fail;
