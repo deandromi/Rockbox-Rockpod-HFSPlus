@@ -41,6 +41,7 @@ struct hfs_io {
 #define HFS_OVL_BLOCK             4096u
 #define HFS_OVL_ENTRY_SIZE        320u
 #define HFS_OVL_MAX_ENTRIES       2048u
+#define HFS_OVL_READ_CHUNK        96u
 #define HFS_OVL_MAX_BLOCKS        524288u /* 2 GiB at 4 KiB/block */
 #define HFS_OVL_BITMAP_MAX        (HFS_OVL_MAX_BLOCKS / 8u)
 #define HFS_OVL_ID_BASE           0x40000000u
@@ -87,6 +88,9 @@ struct hfs_overlay {
     struct hfs_ro_entry container;
     uint8_t bitmap[HFS_OVL_BITMAP_MAX];
     struct hfs_overlay_entry entries[HFS_OVL_MAX_ENTRIES];
+    /* RAM-only: a legacy duplicate live name is hidden, but its data range is
+     * still validated and left allocated. */
+    uint8_t shadowed[HFS_OVL_MAX_ENTRIES];
     /* RAM-only acceleration indexes. They are rebuilt from persistent entries
      * at mount, so they cannot corrupt the on-disk overlay. */
     uint16_t id_hash[HFS_OVL_ID_HASH_SIZE];
@@ -682,6 +686,8 @@ static void overlay_rebuild_indexes(struct hfs_overlay *o)
         }
         if (o->entries[i].id > max_id)
             max_id = o->entries[i].id;
+        if (o->shadowed[i])
+            continue;
         overlay_id_insert(o, i);
         overlay_parent_insert(o, i);
     }
@@ -706,6 +712,7 @@ static int overlay_validate(struct hfs_state *s)
 {
     struct hfs_overlay *o = &s->overlay;
     uint32_t max_id = HFS_OVL_ID_BASE - 1u;
+    memset(o->shadowed, 0, sizeof(o->shadowed));
 
     if (!o->total_blocks || !o->bitmap_bytes ||
         (o->version != HFS_OVL_VERSION_V1 &&
@@ -734,27 +741,45 @@ static int overlay_validate(struct hfs_state *s)
         if (e->name[e->name_len] != '\0' ||
             strlen(e->name) != e->name_len)
             return HFS_RO_FORMAT;
-        for (unsigned int j = 0; j < i; ++j) {
-            const struct hfs_overlay_entry *p = &o->entries[j];
-            if (!(p->flags & HFS_OVL_USED))
-                continue;
-            if (p->id == e->id)
-                return HFS_RO_FORMAT;
-            /* One live BASE shadow (or one tombstone) per logical object. */
-            if ((e->flags & (HFS_OVL_BASE | HFS_OVL_TOMBSTONE)) &&
-                (p->flags & (HFS_OVL_BASE | HFS_OVL_TOMBSTONE)) &&
-                p->parent == e->parent && p->base_id == e->base_id &&
-                p->flags == e->flags &&
-                overlay_name_eq(p->name, e->name))
-                return HFS_RO_FORMAT;
-            if ((e->flags & HFS_OVL_BASE) && (p->flags & HFS_OVL_BASE) &&
-                e->base_id == p->base_id)
-                return HFS_RO_FORMAT;
-            if (!(e->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) &&
-                !(p->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) &&
-                e->parent == p->parent &&
-                overlay_name_eq(e->name, p->name))
-                return HFS_RO_FORMAT;
+        if (!o->shadowed[i]) {
+            for (unsigned int j = 0; j < i; ++j) {
+                const struct hfs_overlay_entry *p = &o->entries[j];
+                if (!(p->flags & HFS_OVL_USED) || o->shadowed[j])
+                    continue;
+                if (p->id == e->id)
+                    return HFS_RO_FORMAT;
+                /* Old firmware allowed duplicate live names and duplicate
+                 * BASE shadows.  Keep the newest ID and hide the older one in
+                 * RAM; never reject an otherwise readable legacy overlay. */
+                if ((e->flags & (HFS_OVL_BASE | HFS_OVL_TOMBSTONE)) &&
+                    (p->flags & (HFS_OVL_BASE | HFS_OVL_TOMBSTONE)) &&
+                    p->parent == e->parent && p->base_id == e->base_id &&
+                    p->flags == e->flags &&
+                    overlay_name_eq(p->name, e->name)) {
+                    if (p->id < e->id)
+                        o->shadowed[j] = 1;
+                    else
+                        o->shadowed[i] = 1;
+                }
+                if (!(e->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) &&
+                    !(p->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) &&
+                    e->parent == p->parent &&
+                    overlay_name_eq(e->name, p->name)) {
+                    if (p->id < e->id)
+                        o->shadowed[j] = 1;
+                    else
+                        o->shadowed[i] = 1;
+                }
+                if ((e->flags & HFS_OVL_BASE) && (p->flags & HFS_OVL_BASE) &&
+                    e->base_id == p->base_id) {
+                    if (p->id < e->id)
+                        o->shadowed[j] = 1;
+                    else
+                        o->shadowed[i] = 1;
+                }
+                if (o->shadowed[i])
+                    break;
+            }
         }
         if (e->flags & HFS_OVL_TOMBSTONE) {
             if (e->data_blocks || e->data_start || e->size ||
@@ -882,8 +907,8 @@ static int overlay_hides_base(const struct hfs_overlay *o, uint32_t parent,
             if (idx >= HFS_OVL_MAX_ENTRIES)
                 break;
             const struct hfs_overlay_entry *e = &o->entries[idx];
-            if (!(e->flags & HFS_OVL_USED) || e->parent != p ||
-                e->base_id != base_id)
+            if (!(e->flags & HFS_OVL_USED) || o->shadowed[idx] ||
+                e->parent != p || e->base_id != base_id)
                 continue;
             if (e->flags & HFS_OVL_TOMBSTONE) {
                 /* CNID reuse makes a tombstone's base_id ambiguous.  Ignoring
@@ -1015,6 +1040,7 @@ static void overlay_destroy_entry(struct hfs_overlay *o, unsigned int index)
     overlay_id_remove(o, o->entries[index].id);
     overlay_parent_remove(o, index, o->entries[index].parent);
     memset(&o->entries[index], 0, sizeof(o->entries[index]));
+    o->shadowed[index] = 0;
     o->header_dirty = 1;
     if (o->free_slot_hint == HFS_OVL_NONE ||
         index < o->free_slot_hint)
@@ -1332,7 +1358,8 @@ static int overlay_create_entry(struct hfs_state *s, uint32_t parent,
     if (!(flags & HFS_OVL_TOMBSTONE)) {
         for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
             const struct hfs_overlay_entry *e = &s->overlay.entries[i];
-            if ((e->flags & (HFS_OVL_USED | HFS_OVL_DELETED |
+            if (!s->overlay.shadowed[i] &&
+                (e->flags & (HFS_OVL_USED | HFS_OVL_DELETED |
                              HFS_OVL_TOMBSTONE)) == HFS_OVL_USED &&
                 e->parent == parent && overlay_name_eq(e->name, name))
                 return HFS_RO_ARGUMENT;
@@ -1393,7 +1420,8 @@ static int overlay_tombstone(struct hfs_state *s, uint32_t parent,
         if (i >= HFS_OVL_MAX_ENTRIES)
             break;
         struct hfs_overlay_entry *e = &s->overlay.entries[i];
-        if ((e->flags & (HFS_OVL_USED | HFS_OVL_TOMBSTONE)) ==
+        if (!s->overlay.shadowed[i] &&
+            (e->flags & (HFS_OVL_USED | HFS_OVL_TOMBSTONE)) ==
                 (HFS_OVL_USED | HFS_OVL_TOMBSTONE) &&
             e->parent == parent && e->base_id == base_id &&
             overlay_name_eq(e->name, name))
@@ -1583,28 +1611,38 @@ static int overlay_load(struct hfs_state *s)
         if (!overlay_bit(o, b))
             return overlay_diag_fail(s, 6, HFS_RO_FORMAT, (int)b);
 
-    /* Read and validate each overlay table entry separately. */
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
-        s->diag.ovl_stage = 7; /* read one entry */
-        rc = overlay_container_read(s, overlay_entry_offset(o, i),
-                                    s->scratch, HFS_OVL_ENTRY_SIZE);
+    /* Read the entry table in chunks.  Reading 320 bytes per slot made
+     * startup wait for 2,048 small ATA requests even when only a handful of
+     * entries were used. */
+    for (unsigned int base = 0; base < HFS_OVL_MAX_ENTRIES;
+         base += HFS_OVL_READ_CHUNK) {
+        unsigned int count = HFS_OVL_MAX_ENTRIES - base;
+        if (count > HFS_OVL_READ_CHUNK)
+            count = HFS_OVL_READ_CHUNK;
+        s->diag.ovl_stage = 7; /* read a table chunk */
+        rc = overlay_container_read(s, overlay_entry_offset(o, base),
+                                    s->scratch,
+                                    count * HFS_OVL_ENTRY_SIZE);
         if (rc)
-            return overlay_diag_fail(s, 7, rc, (int)i);
-
-        s->diag.ovl_stage = 8; /* decode/validate one entry */
-        rc = overlay_decode_entry(&o->entries[i], s->scratch);
-        if (rc) {
-            /* Preserve exactly what the iPod decoded before the validator
-             * rejected this slot. This distinguishes bad on-device reads
-             * from a validator/format assumption mismatch. */
-            s->diag.ovl_id = o->entries[i].id;
-            s->diag.ovl_parent = o->entries[i].parent;
-            s->diag.ovl_flags = o->entries[i].flags;
-            s->diag.ovl_data_start = o->entries[i].data_start;
-            s->diag.ovl_data_blocks = o->entries[i].data_blocks;
-            s->diag.ovl_kind = o->entries[i].kind;
-            s->diag.ovl_name_len = o->entries[i].name_len;
-            return overlay_diag_fail(s, 8, rc, (int)i);
+            return overlay_diag_fail(s, 7, rc, (int)base);
+        s->diag.ovl_stage = 8; /* decode/validate entries */
+        for (unsigned int k = 0; k < count; ++k) {
+            unsigned int i = base + k;
+            rc = overlay_decode_entry(&o->entries[i],
+                                      s->scratch + k * HFS_OVL_ENTRY_SIZE);
+            if (rc) {
+                /* Preserve exactly what the iPod decoded before the validator
+                 * rejected this slot. This distinguishes bad on-device reads
+                 * from a validator/format assumption mismatch. */
+                s->diag.ovl_id = o->entries[i].id;
+                s->diag.ovl_parent = o->entries[i].parent;
+                s->diag.ovl_flags = o->entries[i].flags;
+                s->diag.ovl_data_start = o->entries[i].data_start;
+                s->diag.ovl_data_blocks = o->entries[i].data_blocks;
+                s->diag.ovl_kind = o->entries[i].kind;
+                s->diag.ovl_name_len = o->entries[i].name_len;
+                return overlay_diag_fail(s, 8, rc, (int)i);
+            }
         }
     }
 
@@ -2027,9 +2065,13 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
     mutex_lock(&s->mutex);
     rc = hfs_ro_mount(&s->volume, device_read, &s->io, base, length,
                       s->scratch, sizeof(s->scratch));
+#ifndef BOOTLOADER
+    /* The bootloader loads one firmware path.  Building the full directory
+     * and CNID indexes there only delays startup. */
     if (!rc)
         rc = hfs_ro_enable_fast_index(&s->volume, s->catalog_cache,
                                       sizeof(s->catalog_cache));
+#endif
     if (!rc) {
 #ifdef BOOTLOADER
         /* The bootloader must be able to load a native rockbox.ipod even when
@@ -2118,7 +2160,8 @@ bool hfsplus_size(int volume, sector_t *size, sector_t *free)
 static struct hfs_overlay_entry *overlay_file_entry(struct hfs_state *s,
                                                     const struct fat_file *file)
 {
-    if (!file->hfs_overlay || file->hfs_overlay_index >= HFS_OVL_MAX_ENTRIES)
+    if (!file->hfs_overlay || file->hfs_overlay_index >= HFS_OVL_MAX_ENTRIES ||
+        s->overlay.shadowed[file->hfs_overlay_index])
         return NULL;
     struct hfs_overlay_entry *e = &s->overlay.entries[file->hfs_overlay_index];
     if ((e->flags & (HFS_OVL_USED | HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) !=
@@ -2561,7 +2604,7 @@ int hfsplus_readdir(struct fat_filestr *stream, struct fat_dirscan_info *scan,
         while (scan->hfs_overlay_index < HFS_OVL_MAX_ENTRIES) {
             unsigned int idx = scan->hfs_overlay_index++;
             struct hfs_overlay_entry *oe = &s->overlay.entries[idx];
-            if (!(oe->flags & HFS_OVL_USED) ||
+            if (!(oe->flags & HFS_OVL_USED) || s->overlay.shadowed[idx] ||
                 (oe->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) ||
                 (oe->parent != logical_parent &&
                  (!backing_parent || oe->parent != backing_parent)))

@@ -106,6 +106,24 @@ class AdapterTests(unittest.TestCase):
         struct.pack_into(">I", b, fork + 16, 6000)  # free block
         self.run_harness(bytes(b), "readonly")
 
+    def test_legacy_duplicate_live_name_is_shadowed(self):
+        out = self.run_harness(self.image, "twofiles")
+        b = bytearray(out)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        es, _, entry_start, _ = entries(b, base)
+        a = next(e for e in es if e["name"] == b"a.txt")
+        b_entry = next(e for e in es if e["name"] == b"b.txt")
+        name = b"a.txt"
+        raw = b[base + entry_start + b_entry["slot"] * 320:
+                base + entry_start + (b_entry["slot"] + 1) * 320]
+        raw = bytearray(raw)
+        raw[38:40] = struct.pack("<H", len(name))
+        raw[40:40 + len(name)] = name
+        raw[40 + len(name):] = b"\0" * (320 - 40 - len(name))
+        b[base + entry_start + b_entry["slot"] * 320:
+          base + entry_start + (b_entry["slot"] + 1) * 320] = raw
+        self.run_harness(bytes(b), "legacy-duplicate")
+
     def test_timestamps_are_exposed(self):
         self.run_harness(self.image, "timestamps")
 
