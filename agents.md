@@ -46,7 +46,7 @@ The motivating problem is real: the author experienced repeated FAT32 corruption
 | `bootloader/ipod-s5l87xx.c` HFS+ diagnostics | This project | Small integration delta around a standard bootloader. |
 | `utils/mks5lboot` | Upstream Rockbox/Rockpod | Standard DFU installer. Do not “improve” casually. |
 | `tools/hfsplus` | This project | Host tests and image inspector. |
-| `tools/rockpod` | This project | Mac-side Cover Flow index and `.pfraw` cache builders. |
+| `tools/rockpod` | This project | Mac-side Cover Flow index/artwork builders, canonical overlay validator and read-only overlay exporter. |
 | `apps/plugins/pictureflow` | Rockpod with Rockbox base | Large inherited file with Rockpod UI changes. |
 | `apps/recorder/jpeg_load.c` | Rockbox with a targeted repair | The repair is the quant-table selection at the end of `jpeg_decode()`. |
 | `apps/buffering.c`, `apps/playback.c`, `apps/debug_menu.c` | Rockpod/Rockbox plus diagnostics | The `buf_albumart_debug` path is custom. |
@@ -506,7 +506,7 @@ Overlay slot: -1
 ### 7.2 Host inspection
 
 - Use `hfsplus-inspect` for the native volume. It never writes.
-- For the overlay, use the read-only parser in `tools/rockpod/build_rockpod_coverflow_index.py` (`overlay_conflicts`) or the equivalent snippet in `README.md`. Both assume `RPOVL11`, version 1, block 4096, count 2048. Do not “fix” a damaged overlay by writing to it from a script.
+- For the overlay, use the canonical read-only parser in `tools/rockpod/overlay_check.py` (v1 and v2 layouts). Do not “fix” a damaged overlay by writing to it from a script.
 - `diskutil verifyVolume` checks the native HFS+ filesystem only. It does not validate the overlay’s internal format.
 - `diskutil info` is the authority for the actual mount point, size and filesystem.
 
@@ -569,7 +569,7 @@ The Mac Cover Flow index helper was **host-verified** during this review, not as
 |---:|---|---|
 | 1 | Split `hfsplus_rb.c` into `hfsplus_io.c`, `hfsplus_overlay_format.c`, `hfsplus_overlay_alloc.c`, `hfsplus_overlay_store.c`, `hfsplus_namespace.c`, `hfsplus_fat.c`, `hfsplus_diag.c`. | Each unit becomes testable in isolation. The 1,980-line file currently forces every reader to hold the whole format, allocator and FAT contract in their head. |
 | 2 | Introduce one `overlay_validate()` that establishes all invariants once: metadata range, entry ID uniqueness, `size <= data_blocks*4096`, `data_start+data_blocks <= total_blocks`, bitmap/entry agreement, free-count agreement, parent/name validity. | Removes scattered ad-hoc checks in read/write paths and makes corrupt-entry behavior predictable. |
-| 3 | Make the overlay parser a single canonical host tool (C or Python), and have the Python scripts shell out to it. | Removes three/four copies of `RPOVL11` layout knowledge (C, `build_rockpod_coverflow_index.py`, README snippet, debug display). |
+| 3 | Keep the canonical host parser (`tools/rockpod/overlay_check.py`) in sync with the C overlay layout. | The Python installers and exporter now share one validator instead of duplicating `RPOVL11` knowledge. |
 | 4 | Extract shared endian/bounds helpers used by `hfsplus_ro.c`, `hfsplus_partition.c` and the overlay. | `be16/be32/be64/le32/le64` and range checks are duplicated. One checked-arithmetic header prevents subtle divergence. |
 | 5 | Replace the `fat_is_readonly()` name with a capability query (`hfsplus_write_mode()`) and centralize the error mapping. | The current name lies; call sites must remember `fat_is_readonly && !hfsplus_writable`. A capability enum makes the three modes explicit. |
 | 6 | Move the hard-coded `16510 * 4096` fallback and iPod virtual-sector policy out of `hfsplus_rb.c` into the `ipod6g` target layer. | Generic adapter code should not know one device’s USB LBA convention. This is a boundary leak. |

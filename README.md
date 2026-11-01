@@ -4,11 +4,11 @@
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
-Tested on one iPod Classic 6G: playback, database, Cover Flow, settings and album art. It is not a guarantee for every Classic revision, storage adapter or HFS+ layout.
+Built for the iPod Classic 6G. Compatibility depends on the Classic revision, storage adapter and HFS+ layout; test on your own device before relying on it.
 
 ## Why this exists
 
-FAT32 was unreliable on the tested iPod. Rockpod HFS+ keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume.
+FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume.
 
 ## Quick facts
 
@@ -32,7 +32,7 @@ V2.0 resolves all remaining audit findings; six are documented format limits. Se
 - Name lookup is exact-byte. HFS+ Unicode normalization/case folding and full `/`↔`:` name mapping are not implemented.
 - Resource forks, symlinks, hardlinks, compression, encryption and HFS wrappers are unsupported.
 - The `ipod6g` build supports one HFS+ data partition. Extended/logical MBR partitions are not traversed.
-- Overlay: at least 16 MiB, at most 2 GiB, 2,048 entries. Keep bulk music in the native HFS+ library.
+- Overlay: 1 GiB recommended, 16 MiB minimum, 2 GiB maximum, 2,048 entries. The container cannot be resized in place. Keep bulk music in the native HFS+ library.
 - Do **not** use Rockbox USB mass-storage mode for transfers. Use Apple Disk Mode.
 - Do **not** use on-device **Database Initialize/Update** or PictureFlow **Rebuild/Update Cache**. Use the Mac workflow below.
 - `.rockbox` is a dot directory: use **Show Files → All** in Rockbox and `Cmd+Shift+.` in Finder.
@@ -41,16 +41,45 @@ V2.0 resolves all remaining audit findings; six are documented format limits. Se
 
 Download the release assets, or build them from source. Back up the iPod and `.rockpod-rw` first.
 
-### 1. Enter Apple Disk Mode
+### 1. Back up, enter Disk Mode, and format HFS+
 
-Connect the iPod, then verify the mounted HFS+ volume:
+**Formatting erases the iPod.** Back up first. The HFS+ bootloader and Rockpod firmware are then installed separately.
+
+Enter Apple Disk Mode:
+
+1. Disconnect the iPod.
+2. Hold **Menu + Select** until the screen resets or goes black.
+3. Immediately hold **Select + Play/Pause** until **Disk Mode** appears.
+4. Connect the USB cable and wait for the volume to mount.
+
+Back up the entire volume, including hidden files such as `.rockpod-rw`:
+
+```sh
+backup="$HOME/Documents/ipod-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$backup"
+ditto "/Volumes/IPOD" "$backup/IPOD"
+diskutil verifyVolume "/Volumes/IPOD"
+```
+
+If `/Volumes/IPOD` is not the mount point, use the actual path. Do not skip the backup: a failed DFU install or an Apple firmware restore can erase the iPod.
+
+A new installation must use HFS+. If the iPod is already HFS+ and contains a working Rockpod install, skip the format command and continue at step 2.
+
+Format with the terminal, not Disk Utility. Identify the correct whole disk by its size and model, not by a disk number copied from this example:
 
 ```sh
 diskutil list
-diskutil info /Volumes/IPOD
+diskutil info /dev/diskN
 ```
 
-If the mount point differs, replace `/Volumes/IPOD` everywhere.
+Replace `diskN` with the iPod's whole disk, then:
+
+```sh
+diskutil unmountDisk /dev/diskN
+sudo diskutil eraseDisk JHFS+ IPOD APM /dev/diskN
+```
+
+This creates a clean Apple Partition Map with one journaled HFS+ volume. It removes the Apple firmware partition and all data. The HFS+ bootloader is required to boot Rockpod afterwards. If your macOS version rejects `APM`, use `GPT` in the same command. If you need the Apple firmware/dual-boot layout, restore the iPod with Finder before starting over.
 
 ### 2. Create the overlay only for a new install
 
@@ -295,6 +324,24 @@ Install a new bootloader only when the release notes say so. After adding or ret
 - **Wrong or damaged bootloader**: reinstall over DFU; firmware files alone cannot repair NOR.
 
 A damaged overlay must be copied and inspected before repair. Deleting `.rockpod-rw` discards settings, databases, playlists and overlay files.
+
+### If the iPod will not boot
+
+1. Re-enter Apple Disk Mode and reinstall `rockbox.zip`.
+2. If the bootloader is damaged, reinstall it over DFU using step 3.
+3. As a last resort, restore the Apple firmware with Finder. This erases the iPod and all Rockpod data.
+
+Do not delete `.rockpod-rw` as a first response; it contains settings, databases, playlists and overlay files.
+
+### Finder does not show Rockpod-created files
+
+macOS sees only the native HFS+ tree. Files created or changed inside Rockpod live in `.rockpod-rw` and are not merged into Finder. To inspect or back them up while the iPod is in Apple Disk Mode:
+
+```sh
+python3 tools/rockpod/export_overlay.py --ipod "/Volumes/IPOD"
+```
+
+The export is read-only and writes a normal folder under `~/Documents` with the reconstructed files and a `manifest.tsv`. It does not merge the files back into the iPod. A file whose parent directory is no longer available is placed under `by-cnid-<id>/` so it is not lost.
 
 ## Build on macOS
 

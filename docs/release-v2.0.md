@@ -39,6 +39,10 @@ Public version string: `2.0-v12.2`
   old artwork is kept on failure; parent directories are fsynced; the Cover
   Flow conflict checker validates the overlay and matches names, tombstones and
   HFS+ CNIDs (`st_ino`).
+- A read-only Mac overlay exporter (`tools/rockpod/export_overlay.py`)
+  reconstructs overlay paths through native HFS+ CNIDs so files created
+  inside `.rockpod-rw` can be inspected or backed up from Finder-visible
+  storage.
 - A committed host adapter harness (`make -C tools/hfsplus test`) exercises
   read/write/remount, ENOSPC, duplicate shadows, directory renames, bitmap
   corruption, overlapping runs, duplicate IDs, v2 header recovery, container

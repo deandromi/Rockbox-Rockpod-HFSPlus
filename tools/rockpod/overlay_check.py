@@ -33,44 +33,47 @@ def _header_sum(raw: bytes) -> int:
 
 
 def parse(path: Path):
-    data = path.read_bytes()
-    if len(data) < BLOCK:
-        raise OverlayError("overlay is smaller than one block")
-    header = data[:BLOCK]
-    magic = header[:8]
-    if magic == b"RPOVL12\0":
-        version = 2
-    elif magic == b"RPOVL11\0":
-        version = 1
-    else:
-        raise OverlayError(f"unknown overlay magic {magic!r}")
-    block, count, total, bitmap_bytes, data_start, next_id, generation = \
-        struct.unpack_from("<7I", header, 12)
-    if block != BLOCK or count != MAX_ENTRIES:
-        raise OverlayError("unsupported overlay layout")
-    stored = struct.unpack_from("<I", header, 40)[0]
-    if (version == 2 and not stored) or (stored and stored != _header_sum(header)):
-        raise OverlayError("overlay header checksum mismatch")
-    if total * BLOCK > len(data):
-        raise OverlayError("overlay header exceeds file size")
-    bitmap_start = 1 if version == 1 else 2
-    bitmap_blocks = (bitmap_bytes + BLOCK - 1) // BLOCK
-    entry_blocks = (MAX_ENTRIES * ENTRY_SIZE + BLOCK - 1) // BLOCK
-    expected = bitmap_start + bitmap_blocks + entry_blocks
-    if data_start != expected or data_start >= total:
-        raise OverlayError("overlay data start is inconsistent")
-    bitmap = data[bitmap_start * BLOCK:bitmap_start * BLOCK + bitmap_bytes]
-    if len(bitmap) != bitmap_bytes:
-        raise OverlayError("truncated overlay bitmap")
-    entry_at = (bitmap_start + bitmap_blocks) * BLOCK
+    file_size = path.stat().st_size
+    with path.open("rb") as f:
+        header = f.read(BLOCK)
+        if len(header) < BLOCK:
+            raise OverlayError("overlay is smaller than one block")
+        magic = header[:8]
+        if magic == b"RPOVL12\0":
+            version = 2
+        elif magic == b"RPOVL11\0":
+            version = 1
+        else:
+            raise OverlayError(f"unknown overlay magic {magic!r}")
+        block, count, total, bitmap_bytes, data_start, next_id, generation = \
+            struct.unpack_from("<7I", header, 12)
+        if block != BLOCK or count != MAX_ENTRIES:
+            raise OverlayError("unsupported overlay layout")
+        stored = struct.unpack_from("<I", header, 40)[0]
+        if (version == 2 and not stored) or (stored and stored != _header_sum(header)):
+            raise OverlayError("overlay header checksum mismatch")
+        if total * BLOCK > file_size:
+            raise OverlayError("overlay header exceeds file size")
+        bitmap_start = 1 if version == 1 else 2
+        bitmap_blocks = (bitmap_bytes + BLOCK - 1) // BLOCK
+        entry_blocks = (MAX_ENTRIES * ENTRY_SIZE + BLOCK - 1) // BLOCK
+        expected = bitmap_start + bitmap_blocks + entry_blocks
+        if data_start != expected or data_start >= total:
+            raise OverlayError("overlay data start is inconsistent")
+        f.seek(bitmap_start * BLOCK)
+        bitmap = f.read(bitmap_bytes)
+        if len(bitmap) != bitmap_bytes:
+            raise OverlayError("truncated overlay bitmap")
+        entry_at = (bitmap_start + bitmap_blocks) * BLOCK
+        f.seek(entry_at)
+        table = f.read(MAX_ENTRIES * ENTRY_SIZE)
+        if len(table) != MAX_ENTRIES * ENTRY_SIZE:
+            raise OverlayError("truncated overlay entry table")
     entries = []
     ids = set()
     owned = []
     for slot in range(MAX_ENTRIES):
-        raw = data[entry_at + slot * ENTRY_SIZE:
-                   entry_at + (slot + 1) * ENTRY_SIZE]
-        if len(raw) != ENTRY_SIZE:
-            raise OverlayError("truncated overlay entry table")
+        raw = table[slot * ENTRY_SIZE:(slot + 1) * ENTRY_SIZE]
         ident, parent, flags, base_id = struct.unpack_from("<4I", raw, 0)
         if not flags & FLAG_USED:
             continue
@@ -122,7 +125,6 @@ def parse(path: Path):
                 raise OverlayError(f"orphan/cyclic parent in slot {entry['slot']}")
             parent = parent_entry["parent"]
     return entries
-
 
 def conflicts(path: Path, names, native_ids=None):
     """Return entries that could hide a target name or native CNID."""
