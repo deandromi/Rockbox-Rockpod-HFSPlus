@@ -66,6 +66,9 @@
 #ifndef dir_exists
 #define dir_exists      FS_PREFIX(dir_exists)
 #endif
+#ifndef dir_get_info
+#define dir_get_info    FS_PREFIX(dir_get_info)
+#endif
 #ifndef root_realpath
 #define root_realpath      FS_PREFIX(root_realpath)
 #endif

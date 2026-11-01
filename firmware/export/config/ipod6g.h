@@ -6,6 +6,7 @@
 
 #if !defined(SIMULATOR) && !defined(__PCTOOL__)
 #define HAVE_HFSPLUS_RO
+#define HAVE_STORAGE_FLUSH
 #endif
 
 /* For Rolo and boot loader */

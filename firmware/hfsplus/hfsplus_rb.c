@@ -88,6 +88,10 @@ static struct hfs_state {
     struct hfs_io io;
     struct hfs_overlay overlay;
     struct mutex mutex;
+    /* Set when a container is present but invalid, or when the container is
+     * absent.  Read access remains available, but native in-place writes are
+     * not a safe fallback for a writable-overlay firmware. */
+    int force_readonly;
     uint8_t scratch[HFS_RO_MAX_NODE_SIZE];
     uint8_t catalog_cache[HFS_RO_MAX_NODE_SIZE] __attribute__((aligned(32)));
 } states[NUM_VOLUMES];
@@ -129,6 +133,18 @@ static int setup_io(struct hfs_io *io, int drive)
     io->sector_size = info.sector_size;
     io->size = (uint64_t)info.num_sectors * info.sector_size;
     return 0;
+}
+
+static int device_read(void *ctx, uint64_t offset, void *buffer, size_t length);
+
+static int hfsplus_signature_at(const struct hfs_io *io, uint64_t offset)
+{
+    uint8_t sig[2];
+    if (offset > io->size || io->size - offset < 1536)
+        return 0;
+    if (device_read((void *)io, offset + 1024, sig, sizeof(sig)))
+        return 0;
+    return sig[0] == 'H' && (sig[1] == '+' || sig[1] == 'X');
 }
 
 static int device_read(void *ctx, uint64_t offset, void *buffer, size_t length)
@@ -347,6 +363,15 @@ static uint32_t overlay_free_blocks(const struct hfs_overlay *o)
     return o->ready ? o->free_blocks : 0;
 }
 
+static int overlay_flush(void)
+{
+#ifdef HAVE_STORAGE_FLUSH
+    if (storage_flush())
+        return HFS_RO_IO;
+#endif
+    return HFS_RO_OK;
+}
+
 static int overlay_sync_header(struct hfs_state *s)
 {
     struct hfs_overlay *o = &s->overlay;
@@ -361,13 +386,15 @@ static int overlay_sync_header(struct hfs_state *s)
     ovl_put32(b + 28, o->data_start);
     ovl_put32(b + 32, o->next_id);
     ovl_put32(b + 36, ++o->generation);
-    return overlay_container_write(s, 0, b, HFS_OVL_BLOCK);
+    int rc = overlay_container_write(s, 0, b, HFS_OVL_BLOCK);
+    return rc ? rc : overlay_flush();
 }
 
 static int overlay_sync_bitmap(struct hfs_state *s)
 {
-    return overlay_container_write(s, HFS_OVL_BLOCK, s->overlay.bitmap,
-                                   s->overlay.bitmap_bytes);
+    int rc = overlay_container_write(s, HFS_OVL_BLOCK, s->overlay.bitmap,
+                                     s->overlay.bitmap_bytes);
+    return rc ? rc : overlay_flush();
 }
 
 /* Persist only the device sectors of the bitmap touched by an allocation.
@@ -385,8 +412,9 @@ static int overlay_sync_bitmap_range(struct hfs_state *s, uint32_t start,
     uint32_t end = (last + 1u + unit - 1u) / unit * unit;
     if (end > o->bitmap_bytes)
         end = o->bitmap_bytes;
-    return overlay_container_write(s, HFS_OVL_BLOCK + begin,
-                                   o->bitmap + begin, end - begin);
+    int rc = overlay_container_write(s, HFS_OVL_BLOCK + begin,
+                                     o->bitmap + begin, end - begin);
+    return rc ? rc : overlay_flush();
 }
 
 static void overlay_encode_entry(const struct hfs_overlay_entry *e, uint8_t *b)
@@ -422,7 +450,11 @@ static int overlay_decode_entry(struct hfs_overlay_entry *e, const uint8_t *b)
     if (!(e->flags & HFS_OVL_USED))
         return HFS_RO_OK;
     if ((e->kind != 1 && e->kind != 2) || !e->id ||
-        e->name_len > 260 || e->parent < HFS_RO_ROOT_ID ||
+        e->name_len == 0 || e->name_len > FAT_DIRENTRY_NAME_MAX ||
+        e->id < HFS_OVL_ID_BASE || e->id > 0x7fffffffu ||
+        (e->flags & ~(HFS_OVL_USED | HFS_OVL_DELETED |
+                      HFS_OVL_BASE | HFS_OVL_TOMBSTONE)) ||
+        e->parent < HFS_RO_ROOT_ID ||
         e->data_start > HFS_OVL_MAX_BLOCKS ||
         e->data_blocks > HFS_OVL_MAX_BLOCKS - e->data_start)
         return HFS_RO_FORMAT;
@@ -437,8 +469,9 @@ static int overlay_sync_entry(struct hfs_state *s, unsigned int index)
     if (index >= HFS_OVL_MAX_ENTRIES)
         return HFS_RO_ARGUMENT;
     overlay_encode_entry(&s->overlay.entries[index], raw);
-    return overlay_container_write(s, overlay_entry_offset(&s->overlay, index),
-                                   raw, sizeof(raw));
+    int rc = overlay_container_write(s, overlay_entry_offset(&s->overlay, index),
+                                     raw, sizeof(raw));
+    return rc ? rc : overlay_flush();
 }
 
 static unsigned int overlay_id_bucket(uint32_t id)
@@ -544,6 +577,96 @@ static void overlay_rebuild_indexes(struct hfs_overlay *o)
         o->next_id = max_id == 0x7fffffffu ? HFS_OVL_ID_BASE : max_id + 1u;
 }
 
+/* Validate the persistent overlay as a whole before publishing it as READY.
+ * A single bad entry must make the volume read-only, not let the allocator
+ * hand its blocks to a new file. */
+static int overlay_validate(struct hfs_state *s)
+{
+    struct hfs_overlay *o = &s->overlay;
+    uint32_t max_id = HFS_OVL_ID_BASE - 1u;
+
+    if (!o->total_blocks || !o->bitmap_bytes ||
+        o->data_start >= o->total_blocks ||
+        o->bitmap_blocks > o->total_blocks ||
+        o->entry_blocks > o->total_blocks ||
+        o->data_start > o->total_blocks)
+        return HFS_RO_FORMAT;
+
+    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+        const struct hfs_overlay_entry *e = &o->entries[i];
+        if (!(e->flags & HFS_OVL_USED))
+            continue;
+        if (e->id < HFS_OVL_ID_BASE || e->id > 0x7fffffffu ||
+            e->parent < HFS_RO_ROOT_ID || e->parent == e->id ||
+            e->name_len == 0 ||
+            e->name_len > FAT_DIRENTRY_NAME_MAX ||
+            (e->flags & ~(HFS_OVL_USED | HFS_OVL_DELETED |
+                          HFS_OVL_BASE | HFS_OVL_TOMBSTONE)))
+            return HFS_RO_FORMAT;
+        if (e->id > max_id)
+            max_id = e->id;
+        for (unsigned int j = 0; j < i; ++j) {
+            const struct hfs_overlay_entry *p = &o->entries[j];
+            if ((p->flags & HFS_OVL_USED) && p->id == e->id)
+                return HFS_RO_FORMAT;
+        }
+        if (e->flags & HFS_OVL_TOMBSTONE) {
+            if (e->data_blocks || e->data_start || e->size ||
+                !e->base_id)
+                return HFS_RO_FORMAT;
+            continue;
+        }
+        if (e->kind != 1 && e->kind != 2)
+            return HFS_RO_FORMAT;
+        if (e->flags & HFS_OVL_BASE) {
+            if (!e->base_id)
+                return HFS_RO_FORMAT;
+        }
+        if (e->data_blocks) {
+            if (e->data_start < o->data_start ||
+                e->data_start > o->total_blocks ||
+                e->data_blocks > o->total_blocks - e->data_start)
+                return HFS_RO_FORMAT;
+            if (e->size > (uint64_t)e->data_blocks * HFS_OVL_BLOCK)
+                return HFS_RO_FORMAT;
+            for (uint32_t b = e->data_start;
+                 b < e->data_start + e->data_blocks; ++b)
+                if (!overlay_bit(o, b))
+                    return HFS_RO_FORMAT;
+            for (unsigned int j = 0; j < i; ++j) {
+                const struct hfs_overlay_entry *p = &o->entries[j];
+                if ((p->flags & HFS_OVL_USED) && p->data_blocks &&
+                    e->data_start < p->data_start + p->data_blocks &&
+                    p->data_start < e->data_start + e->data_blocks)
+                    return HFS_RO_FORMAT;
+            }
+        } else if (e->size && !(e->flags & HFS_OVL_BASE)) {
+            return HFS_RO_FORMAT;
+        }
+        if (e->parent >= HFS_OVL_ID_BASE) {
+            int found = 0;
+            for (unsigned int j = 0; j < HFS_OVL_MAX_ENTRIES; ++j) {
+                const struct hfs_overlay_entry *p = &o->entries[j];
+                if ((p->flags & HFS_OVL_USED) && p->id == e->parent &&
+                    p->kind == 1 && !(p->flags & HFS_OVL_TOMBSTONE)) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found)
+                return HFS_RO_FORMAT;
+        }
+    }
+    if (o->next_id < HFS_OVL_ID_BASE || o->next_id > 0x7fffffffu)
+        return HFS_RO_FORMAT;
+    if (o->next_id <= max_id) {
+        if (max_id == 0x7fffffffu)
+            return HFS_RO_FORMAT;
+        o->next_id = max_id + 1u;
+    }
+    return HFS_RO_OK;
+}
+
 static int overlay_find_free_slot(struct hfs_overlay *o)
 {
     unsigned int start = o->free_slot_hint < HFS_OVL_MAX_ENTRIES ?
@@ -575,20 +698,33 @@ static int overlay_find_id(const struct hfs_overlay *o, uint32_t id)
 }
 
 static int overlay_hides_base(const struct hfs_overlay *o, uint32_t parent,
-                              uint32_t base_id, const char *name)
+                              uint32_t backing_parent, uint32_t base_id,
+                              const char *name, int cnid_reused)
 {
     /* Correctness first: overlay namespace lookups are rare compared with
      * native HFS+ catalog reads, and there are at most 2048 overlay entries.
      * A linear walk is deterministic even if the optional RAM parent hash is
      * stale or damaged, which is especially important for database rebuilds
-     * that repeatedly delete and recreate files in /.rockbox. */
+     * that repeatedly delete and recreate files in /.rockbox.
+     *
+     * A shadowed base directory has both a stable native CNID (backing) and a
+     * new overlay ID.  Entries created before a rename retain the old parent,
+     * so both identities must be considered. */
     for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
         const struct hfs_overlay_entry *e = &o->entries[i];
-        if (!(e->flags & HFS_OVL_USED) || e->parent != parent ||
+        if (!(e->flags & HFS_OVL_USED) ||
+            (e->parent != parent &&
+             (!backing_parent || e->parent != backing_parent)) ||
             e->base_id != base_id)
             continue;
-        if ((e->flags & HFS_OVL_TOMBSTONE) ||
-            (!(e->flags & HFS_OVL_DELETED) && !strcasecmp(e->name, name)))
+        if (e->flags & HFS_OVL_TOMBSTONE) {
+            /* CNID reuse makes a tombstone's base_id ambiguous.  Ignoring it
+             * is safer than hiding a newly created object. */
+            if (cnid_reused || strcasecmp(e->name, name))
+                continue;
+            return 1;
+        }
+        if (!(e->flags & HFS_OVL_DELETED) && !strcasecmp(e->name, name))
             return 1;
     }
     return 0;
@@ -735,13 +871,16 @@ static int overlay_realloc(struct hfs_state *s, struct hfs_overlay_entry *e,
             return erc;
     }
 
+    uint32_t oldstart = e->data_start, oldblocks = e->data_blocks;
+    if (e->size > (uint64_t)oldblocks * HFS_OVL_BLOCK)
+        return HFS_RO_FORMAT;
+
     uint32_t newstart;
     int rc = overlay_alloc_run(s, needed, &newstart);
     if (rc)
         return rc;
-    uint32_t oldstart = e->data_start, oldblocks = e->data_blocks;
     uint64_t copied = 0;
-    while (copied < e->size && oldblocks) {
+    while (copied < e->size) {
         size_t chunk = HFS_OVL_BLOCK;
         if (e->size - copied < chunk)
             chunk = (size_t)(e->size - copied);
@@ -759,8 +898,17 @@ static int overlay_realloc(struct hfs_state *s, struct hfs_overlay_entry *e,
         overlay_free_run(s, newstart, needed);
         return rc;
     }
+    /* Publish the new backing run before releasing the old one.  If the entry
+     * write fails, restore the old run and free the new allocation. */
     e->data_start = newstart;
     e->data_blocks = needed;
+    rc = overlay_sync_entry(s, (unsigned int)(e - s->overlay.entries));
+    if (rc) {
+        e->data_start = oldstart;
+        e->data_blocks = oldblocks;
+        overlay_free_run(s, newstart, needed);
+        return rc;
+    }
     if (oldblocks)
         return overlay_free_run(s, oldstart, oldblocks);
     return HFS_RO_OK;
@@ -775,6 +923,15 @@ static int overlay_materialize_base(struct hfs_state *s,
 {
     if (!(e->flags & HFS_OVL_BASE))
         return HFS_RO_OK;
+    /* A previous close on a BASE shadow may have allocated an unused run;
+     * release it before taking ownership of the native data. */
+    if (e->data_blocks) {
+        int rc = overlay_free_run(s, e->data_start, e->data_blocks);
+        if (rc)
+            return rc;
+        e->data_start = 0;
+        e->data_blocks = 0;
+    }
     uint32_t needed = (uint32_t)((e->size + HFS_OVL_BLOCK - 1) / HFS_OVL_BLOCK);
     uint32_t capacity = overlay_growth_target(&s->overlay, 0, needed);
     if (needed) {
@@ -858,13 +1015,23 @@ static int overlay_shrink(struct hfs_state *s, struct hfs_overlay_entry *e,
     if ((e->flags & HFS_OVL_BASE) || needed >= e->data_blocks)
         return HFS_RO_OK;
     uint32_t old = e->data_blocks;
+    uint32_t oldstart = e->data_start;
+    uint64_t oldsize = e->size;
+    unsigned int idx = (unsigned int)(e - s->overlay.entries);
     if (!needed) {
-        int rc = overlay_free_run(s, e->data_start, old);
-        if (rc)
-            return rc;
+        /* Persist the empty entry first; a failed sync must not free the
+         * blocks that the on-disk entry still references. */
         e->data_start = 0;
         e->data_blocks = 0;
-        return HFS_RO_OK;
+        e->size = bytes;
+        int rc = overlay_sync_entry(s, idx);
+        if (rc) {
+            e->data_start = oldstart;
+            e->data_blocks = old;
+            e->size = oldsize;
+            return rc;
+        }
+        return overlay_free_run(s, oldstart, old);
     }
 
     /* Keep moderate slack. Database and PictureFlow files are commonly opened,
@@ -875,9 +1042,15 @@ static int overlay_shrink(struct hfs_state *s, struct hfs_overlay_entry *e,
     uint32_t target = overlay_growth_target(&s->overlay, 0, needed);
     if (target > old)
         target = needed;
-    int rc = overlay_free_run(s, e->data_start + target, old - target);
-    if (!rc)
-        e->data_blocks = target;
+    e->data_blocks = target;
+    e->size = bytes;
+    int rc = overlay_sync_entry(s, idx);
+    if (rc) {
+        e->data_blocks = old;
+        e->size = oldsize;
+        return rc;
+    }
+    rc = overlay_free_run(s, oldstart + target, old - target);
     return rc;
 }
 
@@ -898,7 +1071,8 @@ static int overlay_create_entry(struct hfs_state *s, uint32_t parent,
                                 uint64_t size, int *index)
 {
     size_t n = strlen(name);
-    if (!s->overlay.ready || !n || n > 260 || (kind != 1 && kind != 2))
+    if (!s->overlay.ready || !n || n > FAT_DIRENTRY_NAME_MAX ||
+        (kind != 1 && kind != 2))
         return HFS_RO_ARGUMENT;
     int slot = overlay_find_free_slot(&s->overlay);
     if (slot < 0)
@@ -983,6 +1157,42 @@ static int overlay_load(struct hfs_state *s)
         return overlay_diag_fail(3, rc, -1);
 
     if (memcmp(s->scratch, HFS_OVL_MAGIC, 7)) {
+        bool zero = true;
+        for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i) {
+            if (s->scratch[i]) {
+                zero = false;
+                break;
+            }
+        }
+        /* A zeroed container is a new installation.  Anything else is a
+         * damaged or foreign header; do not overwrite it.  Also require the
+         * first bitmap and entry-table blocks to be zero so a header-only
+         * corruption cannot destroy an existing overlay. */
+        if (!zero)
+            return overlay_diag_fail(3, HFS_RO_FORMAT, -1);
+        rc = overlay_container_read(s, HFS_OVL_BLOCK, s->scratch,
+                                    HFS_OVL_BLOCK);
+        if (rc)
+            return overlay_diag_fail(3, rc, -1);
+        for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i) {
+            if (s->scratch[i]) {
+                zero = false;
+                break;
+            }
+        }
+        rc = overlay_container_read(s,
+                (uint64_t)(1u + o->bitmap_blocks) * HFS_OVL_BLOCK,
+                s->scratch, HFS_OVL_BLOCK);
+        if (rc)
+            return overlay_diag_fail(3, rc, -1);
+        for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i) {
+            if (s->scratch[i]) {
+                zero = false;
+                break;
+            }
+        }
+        if (!zero)
+            return overlay_diag_fail(3, HFS_RO_FORMAT, -1);
         overlay_diag_stage = 10; /* initialise fresh overlay */
         memset(o->bitmap, 0, sizeof(o->bitmap));
         memset(o->entries, 0, sizeof(o->entries));
@@ -1004,6 +1214,9 @@ static int overlay_load(struct hfs_state *s)
         rc = overlay_sync_bitmap(s);
         if (rc)
             return overlay_diag_fail(10, rc, -1);
+        rc = overlay_validate(s);
+        if (rc)
+            return overlay_diag_fail(11, rc, -1);
         overlay_rebuild_indexes(o);
         o->ready = 1;
         rc = overlay_sync_header(s);
@@ -1025,7 +1238,7 @@ static int overlay_load(struct hfs_state *s)
         return overlay_diag_fail(4, HFS_RO_FORMAT, -1);
     o->next_id = ovl_get32(s->scratch + 32);
     o->generation = ovl_get32(s->scratch + 36);
-    if (o->next_id < HFS_OVL_ID_BASE)
+    if (o->next_id < HFS_OVL_ID_BASE || o->next_id > 0x7fffffffu)
         return overlay_diag_fail(4, HFS_RO_FORMAT, -1);
 
     overlay_diag_stage = 5; /* read allocation bitmap */
@@ -1063,6 +1276,9 @@ static int overlay_load(struct hfs_state *s)
         }
     }
 
+    rc = overlay_validate(s);
+    if (rc)
+        return overlay_diag_fail(11, rc, -1);
     overlay_rebuild_indexes(o);
     o->ready = 1;
     overlay_diag_error = 0;
@@ -1080,6 +1296,30 @@ static int overlay_shadow_base(struct hfs_state *s, struct fat_file *file,
     int rc = hfs_ro_find_id(&s->volume, (uint32_t)file->firstcluster, &base);
     if (rc)
         return rc;
+    /* Another handle may already have shadowed this exact base object.  Reuse
+     * that entry instead of creating a second live name for one file. */
+    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+        struct hfs_overlay_entry *e = &s->overlay.entries[i];
+        if ((e->flags & (HFS_OVL_USED | HFS_OVL_DELETED |
+                         HFS_OVL_TOMBSTONE)) == HFS_OVL_USED &&
+            e->base_id == base.id && e->parent == new_parent &&
+            !strcasecmp(e->name, new_name)) {
+            rc = overlay_tombstone(s, (uint32_t)file->dircluster, base.id,
+                                   base.name);
+            if (rc)
+                return rc;
+            file->firstcluster = (long)e->id;
+            file->dircluster = (long)new_parent;
+            file->e.entry = e->id;
+            file->hfs_overlay = 1;
+            file->hfs_overlay_index = (uint16_t)i;
+            file->hfs_backing_id = base.id;
+            file->hfs_kind = base.kind;
+            file->hfs_data = base.data;
+            file->hfs_data.size = e->size;
+            return HFS_RO_OK;
+        }
+    }
     int vis;
     rc = overlay_create_entry(s, new_parent, new_name, base.kind,
                               HFS_OVL_BASE, base.id, base.data.size, &vis);
@@ -1120,6 +1360,7 @@ void hfsplus_init(void)
     for (unsigned int i = 0; i < NUM_VOLUMES; ++i) {
         hfs_ro_unmount(&states[i].volume);
         memset(&states[i].overlay, 0, sizeof(states[i].overlay));
+        states[i].force_readonly = 0;
         mutex_init(&states[i].mutex);
     }
 }
@@ -1139,6 +1380,7 @@ bool fat_is_readonly(const struct fat_file *file)
 bool hfsplus_writable(const struct fat_file *file)
 {
     return file && hfsplus_mounted(IF_MV_VOL(file->volume)) &&
+           !states[IF_MV_VOL(file->volume)].force_readonly &&
            states[IF_MV_VOL(file->volume)].overlay.ready;
 }
 
@@ -1146,6 +1388,8 @@ bool hfsplus_can_write_existing(const struct fat_file *file)
 {
     if (!file || !hfsplus_mounted(IF_MV_VOL(file->volume)) ||
         file->hfs_kind != 2)
+        return false;
+    if (states[IF_MV_VOL(file->volume)].force_readonly)
         return false;
     if (states[IF_MV_VOL(file->volume)].overlay.ready)
         return true;
@@ -1178,12 +1422,17 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
             if (rc)
                 goto out;
         }
-        rc = overlay_ensure_capacity(s, e, size);
-        if (rc)
-            goto out;
-        rc = overlay_shrink(s, e, size);
-        if (rc)
-            goto out;
+        if (!(e->flags & HFS_OVL_BASE)) {
+            rc = overlay_ensure_capacity(s, e, size);
+            if (rc)
+                goto out;
+            rc = overlay_shrink(s, e, size);
+            if (rc)
+                goto out;
+        }
+        /* A BASE entry still references the immutable native data fork.  Do
+         * not allocate a backing run merely because a write handle was closed
+         * without changing the size. */
         e->size = size;
         rc = overlay_sync_entry(s, idx);
         if (!rc) {
@@ -1200,7 +1449,8 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
         int frc = hfs_ro_find_id(&s->volume, (uint32_t)file->firstcluster, &base);
         if (!frc) {
             fat_empty_fat_direntry(fatentp);
-            strcpy((char *)fatentp->name, base.name);
+            strlcpy((char *)fatentp->name, base.name,
+                    sizeof(fatentp->name));
             fatentp->attr = ATTR_ARCHIVE;
             fatentp->filesize = (uint32_t)base.data.size;
             fatentp->firstcluster = (int32_t)base.id;
@@ -1282,10 +1532,14 @@ int hfsplus_partitions(int drive, struct partinfo *parts, int capacity,
                               (uint32_t)p[14] << 16 | (uint32_t)p[15] << 24;
             uint64_t offset = begin * 4096u;
             uint64_t length = blocks * 4096u;
-            if (!begin || !blocks || offset >= scan_io.size)
+            if (!begin || !blocks || offset >= scan_io.size ||
+                length > scan_io.size - offset)
                 continue;
-            if (length > scan_io.size - offset)
-                length = scan_io.size - offset;
+            /* Do not accept the 4096-byte interpretation merely because an
+             * Apple_HFS type byte exists.  A 512-byte-unit MBR can otherwise
+             * hide the real partition. */
+            if (!hfsplus_signature_at(&scan_io, offset))
+                continue;
             found[0].offset = offset;
             found[0].length = length;
             found[0].unit = 4096;
@@ -1340,6 +1594,9 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
     if ((unsigned int)volume >= NUM_VOLUMES || hfsplus_mounted(volume))
         return HFS_RO_ARGUMENT;
     struct hfs_state *s = &states[volume];
+    last_error = 0;
+    last_stage = 0;
+    s->force_readonly = 0;
     int rc = setup_io(&s->io, drive);
     if (rc) {
         last_error = rc;
@@ -1372,11 +1629,27 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
         rc = hfs_ro_enable_fast_index(&s->volume, s->catalog_cache,
                                       sizeof(s->catalog_cache));
     if (!rc) {
+#ifdef BOOTLOADER
+        /* The bootloader must be able to load a native rockbox.ipod even when
+         * the overlay contains a stale tombstone or a damaged header. */
+        memset(&s->overlay, 0, sizeof(s->overlay));
+        s->force_readonly = 1;
+#else
         int orc = overlay_load(s);
-        /* The overlay is optional.  Missing/unsupported container leaves the
-         * volume readable (and v10-style same-size writes still work). */
-        if (orc)
+        if (orc) {
+            /* A missing or invalid container must not silently fall back to
+             * writing the native HFS+ catalog.  Keep the volume readable for
+             * diagnostics/recovery, but disable every write path. */
             memset(&s->overlay, 0, sizeof(s->overlay));
+            s->force_readonly = 1;
+        }
+#endif
+    }
+    if (rc) {
+        /* Never leave a partially initialized volume published as mounted. */
+        memset(&s->overlay, 0, sizeof(s->overlay));
+        s->force_readonly = 0;
+        hfs_ro_unmount(&s->volume);
     }
     mutex_unlock(&s->mutex);
     if (rc) {
@@ -1390,6 +1663,7 @@ void hfsplus_unmount(int volume)
 {
     if ((unsigned int)volume < NUM_VOLUMES) {
         memset(&states[volume].overlay, 0, sizeof(states[volume].overlay));
+        states[volume].force_readonly = 0;
         hfs_ro_unmount(&states[volume].volume);
     }
 }
@@ -1440,7 +1714,7 @@ static void fill_overlay_fatent(const struct hfs_overlay_entry *e,
                                 struct fat_direntry *fatent)
 {
     fat_empty_fat_direntry(fatent);
-    strcpy((char *)fatent->name, e->name);
+    strlcpy((char *)fatent->name, e->name, sizeof(fatent->name));
     fatent->attr = e->kind == 1 ? ATTR_DIRECTORY : ATTR_ARCHIVE;
     fatent->filesize = e->kind == 2 ? (uint32_t)e->size : 0;
     fatent->firstcluster = (int32_t)e->id;
@@ -1470,7 +1744,11 @@ int hfsplus_open(const struct fat_file *parent, long id, struct fat_file *file)
     int oi = overlay_find_id(&s->overlay, (uint32_t)id);
     if (oi >= 0) {
         struct hfs_overlay_entry *oe = &s->overlay.entries[oi];
-        if (oe->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE))
+        uint32_t logical_parent = (uint32_t)parent->firstcluster;
+        uint32_t backing_parent = parent->hfs_overlay && parent->hfs_backing_id ?
+                                  parent->hfs_backing_id : logical_parent;
+        if (oe->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE) ||
+            (oe->parent != logical_parent && oe->parent != backing_parent))
             goto out;
         memset(file, 0, sizeof(*file));
 #ifdef HAVE_MULTIVOLUME
@@ -1508,7 +1786,8 @@ int hfsplus_open(const struct fat_file *parent, long id, struct fat_file *file)
     while ((rc = hfs_ro_iter_next(&s->volume, &it, &e)) > 0) {
         if (e.id != (uint32_t)id)
             continue;
-        if (e.unsupported || e.data.size > FAT_MAX_FILE_SIZE) {
+        if (e.unsupported || e.data.size > FAT_MAX_FILE_SIZE ||
+            strlen(e.name) > FAT_DIRENTRY_NAME_MAX) {
             rc = HFS_RO_UNSUPPORTED;
             goto out;
         }
@@ -1595,21 +1874,34 @@ int hfsplus_remove(struct fat_file *file, enum fat_remove_op what)
             file->hfs_removed = 1;
         }
         if (what & FAT_RM_DATA) {
-            if (!(e->flags & HFS_OVL_BASE) && e->data_blocks) {
-                rc = overlay_free_run(s, e->data_start, e->data_blocks);
-                if (rc)
-                    goto out;
-            }
+            /* Persist the cleared entry before returning its blocks.  A power
+             * loss or failed entry write may leak blocks, but must never leave
+             * a live entry pointing at freed blocks. */
+            struct hfs_overlay_entry old = *e;
             uint32_t old_id = e->id, old_parent = e->parent;
+            uint32_t data_start = e->data_start;
+            uint32_t data_blocks = e->data_blocks;
+            int free_data = !(e->flags & HFS_OVL_BASE) && data_blocks != 0;
             overlay_id_remove(&s->overlay, old_id);
             overlay_parent_remove(&s->overlay, idx, old_parent);
             memset(e, 0, sizeof(*e));
             rc = overlay_sync_entry(s, idx);
+            if (rc) {
+                *e = old;
+                overlay_id_insert(&s->overlay, idx);
+                overlay_parent_insert(&s->overlay, idx);
+                goto out;
+            }
             if ((uint16_t)idx < s->overlay.free_slot_hint ||
                 s->overlay.free_slot_hint == HFS_OVL_NONE)
                 s->overlay.free_slot_hint = (uint16_t)idx;
             file->hfs_overlay = 0;
             file->hfs_overlay_index = HFS_OVL_NONE;
+            if (free_data) {
+                rc = overlay_free_run(s, data_start, data_blocks);
+                if (rc)
+                    goto out;
+            }
         }
     } else {
         if (what & FAT_RM_DIRENTRIES) {
@@ -1651,7 +1943,7 @@ int hfsplus_rename(struct fat_file *parent, struct fat_file *file,
             goto out;
         }
         size_t len = strlen((const char *)newname);
-        if (!len || len > 260) {
+        if (!len || len > FAT_DIRENTRY_NAME_MAX) {
             rc = HFS_RO_ARGUMENT;
             goto out;
         }
@@ -1772,7 +2064,8 @@ int hfsplus_readdir(struct fat_filestr *stream, struct fat_dirscan_info *scan,
             if (logical_parent == HFS_RO_ROOT_ID && !strcmp(e.name, HFS_OVL_NAME))
                 continue;
             if (s->overlay.ready && overlay_hides_base(&s->overlay,
-                    logical_parent, e.id, e.name))
+                    logical_parent, backing_parent, e.id, e.name,
+                    !!(s->volume.attributes & (1u << 12))))
                 continue;
             fat_empty_fat_direntry(entry);
             strcpy((char *)entry->name, e.name);
@@ -1799,7 +2092,8 @@ int hfsplus_readdir(struct fat_filestr *stream, struct fat_dirscan_info *scan,
             struct hfs_overlay_entry *oe = &s->overlay.entries[idx];
             if (!(oe->flags & HFS_OVL_USED) ||
                 (oe->flags & (HFS_OVL_DELETED | HFS_OVL_TOMBSTONE)) ||
-                oe->parent != logical_parent)
+                (oe->parent != logical_parent &&
+                 (!backing_parent || oe->parent != backing_parent)))
                 continue;
             fill_overlay_fatent(oe, entry);
             scan->entry = oe->id;
@@ -1935,14 +2229,16 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
         e.kind = file->hfs_kind;
         e.data = file->hfs_data;
         if (write) {
-            if (!hfsplus_can_write_existing(file) || offset >= e.data.size) {
+            /* Never write a prefix of an extending request: VFS would later
+             * report a size change and hfsplus_closewrite() would fail after
+             * the native data had already been modified. */
+            if (!hfsplus_can_write_existing(file) ||
+                offset > e.data.size ||
+                requested > e.data.size - offset) {
                 rc = HFS_RO_UNSUPPORTED;
                 goto out;
             }
-            size_t writable = requested;
-            if (e.data.size - offset < writable)
-                writable = (size_t)(e.data.size - offset);
-            rc = write_existing_inline(s, &e, offset, buffer, writable);
+            rc = write_existing_inline(s, &e, offset, buffer, requested);
             if (rc)
                 goto out;
             got = requested;
