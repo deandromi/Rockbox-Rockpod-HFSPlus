@@ -333,3 +333,6 @@ __pycache__
 .DS_Store
 
 /tools/hfsplus/tests/adapter_host
+
+# Local XERJ index and memory (semantic project search)
+.xerj-data/

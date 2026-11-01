@@ -399,6 +399,8 @@ Hard stops:
 | `tools/rockpod/export_overlay.py` | Read-only Mac overlay exporter |
 | `tools/rockpod/build_rockpod_*` | Cover Flow index/artwork builders |
 | `tools/database/` | Mac tagcache builder |
+| `tools/xerj/` | Optional local XERJ semantic index/memory scripts (not part of the firmware) |
+| `.xerjignore` | Index scope for the local XERJ node |
 | `BUGFIXES.md` | Per-finding status |
 | `docs/hfsplus-audit.md` | Evidence log |
 | `docs/release-v2.1.1.md` | Current release notes/hashes |
@@ -407,6 +409,23 @@ Hard stops:
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
+
+### 11.1 Optional semantic index
+
+`tools/xerj/` runs the XERJ Community binary as a loopback-only node and keeps
+its data in the git-ignored `.xerj-data/`. `.xerjignore` limits indexing to the
+project docs and the custom HFS+ host/firmware code; the inherited Rockbox tree,
+build directories, backups and `.rockpod-rw` are never indexed.
+
+```sh
+tools/xerj/start.sh      # 127.0.0.1:9200, feedback disabled
+tools/xerj/index.sh      # reindex after docs/code changes
+tools/xerj/recall.sh "why was the overlay rejected at stage 11?"
+```
+
+It is a research aid, not a source of truth: retrieved passages must still be
+checked against the source and the host tests. Never index device backups,
+overlay containers or secrets.
 
 ---
 
