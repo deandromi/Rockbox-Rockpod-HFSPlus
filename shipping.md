@@ -1,7 +1,7 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Release identity: **Rockpod HFS+ — Stable V2.0 // Version V12.2**.
+Release identity: **Rockpod HFS+ — Stable V2.1.1 // Version V12.3**.
 Internal version file: `docs/VERSION` = `1.0-v12.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
@@ -51,14 +51,14 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 | **Mount unwind (HFS-010)** | **FIXED in V1.1 (host)**: failed mounts unmount and the next mount is retried. |
 | Adapter write-path default test | Not run by `make test`; `test_native_adapter` skips unless `HFS_RB_TESTS` is supplied. The temporary harness is not committed. |
 | `check_integration.py` on macOS | Fails with clang/Mach-O/freestanding errors; Linux/GCC-oriented. |
-| Firmware on hardware | Not run in this session. |
+| Firmware on hardware | **V2.1.1 confirmed on the test iPod**: overlay READY, startup, theme selection and playback work. |
 | Bootloader DFU install | Not run in this session. |
-| Full music database / Cover Flow pipeline on hardware | Not run in this session. |
-| Cover Flow track list on hardware | The Mac index `seek`/`artist_seek` fields were host-verified against a two-album database; an on-device track-list check is still required. See §8.2. |
+| Full music database / Cover Flow pipeline on hardware | User-confirmed working on the test device; the full multi-device matrix remains pending. |
+| Cover Flow track list on hardware | Mac index `seek`/`artist_seek` fields were host-verified; V2.1.1 was confirmed working on the test device. |
 
-**Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. A normal Rockbox boot succeeded. V1.1 hardens the settings commit and forces the storage-idle flush after a theme/config load (HFS-133); the controlled reboot test is still required on hardware. See `docs/ipod-device-investigation.md`.
+**Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. V2.1.1 boots with the overlay READY, settings persist after a clean reboot, and theme selection no longer panics. See `docs/ipod-device-investigation.md` and `docs/hardware-validation.md`.
 
-**Conclusion:** V2.0 addresses every remaining audit finding and passes the reader, partition, adapter and sanitizer host checks. Six format/compatibility limits are documented. The device booted normally with the current overlay; the controlled theme/clean-reboot test remains the hardware acceptance check. See `docs/hfsplus-audit.md` and `docs/ipod-device-investigation.md`.
+**Conclusion:** V2.1.1 addresses every remaining audit finding, fixes legacy overlay compatibility found on hardware, and passes the reader, partition, adapter and sanitizer checks. The test iPod reports overlay READY, persists settings/themes and plays normally. Six format/compatibility limits remain documented. See `docs/hfsplus-audit.md`, `docs/release-v2.1.1.md` and `docs/hardware-validation.md`.
 
 ---
 
@@ -84,7 +84,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 ### 1.3 Naming
 
-- Public name: **Stable V2.0 // Version V12.2**.
+- Public name: **Stable V2.1.1 // Version V12.3**.
 - `docs/VERSION`: `1.0-v12.0`.
 - Built firmware version appends the UTC build date, e.g. `1.0-v12.0-261101`.
 - Internal overlay magic/version: `RPOVL11`, format version 1. This is **not** the public release number.
@@ -728,7 +728,7 @@ A successful firmware extraction, overlay initialization and bootloader install 
 
 ## 13. Music database and Cover Flow pipeline
 
-For Stable V2.0, use:
+For Stable V2.1.1, use:
 
 **Mac database -> Mac PictureFlow index -> Mac artwork cache -> clean eject -> playback.**
 

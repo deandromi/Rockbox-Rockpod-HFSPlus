@@ -42,9 +42,9 @@ The audit status is unchanged: 103 findings fixed and 6 documented limits.
 - The reader/partition/adapter suite passes under ASan/UBSan.
 - Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and
   `rockbox.zip` build.
-- V2.1.1 firmware was installed on the test iPod in Apple Disk Mode.
-  The final overlay READY/theme acceptance is still being confirmed on the
-  device at publication time.
+- V2.1.1 firmware was installed on the test iPod in Apple Disk Mode and
+  confirmed working: overlay READY (stage 9, error 0), startup improved,
+  theme selection no longer panics, playback and settings work.
 
 ## SHA-256
 
