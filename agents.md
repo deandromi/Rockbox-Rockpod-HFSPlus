@@ -2,7 +2,7 @@
 
 Status: source-derived, reviewed 2026-11-01.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public release identity: **Stable V2.1 // Version V12.3** (`docs/VERSION` is `2.1-v12.3`).
+Public release identity: **Stable V2.1.1 // Version V12.3** (`docs/VERSION` is `2.1.1-v12.3`).
 This checkout is a source snapshot without `.git` metadata. Do not assume commit history, branches, or a clean diff exists.
 
 This file is the operating contract for AI agents and maintainers. Read it before changing code. It explains what is custom, what is inherited, what must never be broken, and where the sharp edges are.

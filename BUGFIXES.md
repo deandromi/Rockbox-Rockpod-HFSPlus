@@ -31,6 +31,17 @@ The following findings were fixed in the V1.1 maintenance branch and are marked 
 
 Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
+## V2.1.1 hotfix
+
+V2.1.1 fixes the remaining legacy overlay compatibility case found on hardware: an old shadow entry stored a native `base_id` without the `HFS_OVL_BASE` flag. V2.0/V2.1 rejected it at overlay stage 11 (`-2`).
+
+- Non-`BASE` entries with a native backing CNID below `0x40000000` are accepted as legacy shadows.
+- Their data path remains the overlay entry; they are not treated as unmaterialized native BASE shadows.
+- A backing CNID in the overlay ID range is still rejected.
+- Adapter coverage is now 17 tests.
+
+The audit status is unchanged: 103 fixed, 6 documented limits.
+
 ## V2.1 hotfix
 
 V2.1 is a compatibility and startup hotfix on top of V2.0. It does not change the audit status: 103 findings remain fixed and six remain documented limits.

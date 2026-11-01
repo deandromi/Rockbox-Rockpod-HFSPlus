@@ -91,8 +91,8 @@ def parse(path: Path):
             if db or ds or size or not base_id or base_id >= ID_BASE:
                 raise OverlayError(f"invalid tombstone in slot {slot}")
         else:
-            if kind not in (1, 2) or (flags & FLAG_BASE and
-                                      (not base_id or base_id >= ID_BASE)):
+            if kind not in (1, 2) or base_id >= ID_BASE or (
+                    flags & FLAG_BASE and not base_id):
                 raise OverlayError(f"invalid object in slot {slot}")
             if db:
                 if (ds < data_start or ds >= total or

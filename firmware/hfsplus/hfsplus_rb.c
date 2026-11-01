@@ -793,7 +793,10 @@ static int overlay_validate(struct hfs_state *s)
         if (e->flags & HFS_OVL_BASE) {
             if (!e->base_id || e->base_id >= HFS_OVL_ID_BASE)
                 return HFS_RO_FORMAT;
-        } else if (e->base_id) {
+        } else if (e->base_id >= HFS_OVL_ID_BASE) {
+            /* Legacy overlays stored a native backing CNID without setting
+             * HFS_OVL_BASE; keep it as a hint for hiding the native name, but
+             * do not treat the entry as an unmaterialized BASE shadow. */
             return HFS_RO_FORMAT;
         }
         if (e->data_blocks) {

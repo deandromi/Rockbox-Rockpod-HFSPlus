@@ -362,6 +362,20 @@ static int test_legacy_duplicate(void)
     return 0;
 }
 
+static int test_legacy_baseid(void)
+{
+    struct fat_file root, file;
+    char text[64];
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    CHECK(open_path("a.txt", NULL, &root, &file) == 0);
+    CHECK(read_file(&file, text, sizeof(text)) == 0);
+    CHECK(!strcmp(text, "AAAAAAAA"));
+    hfsplus_unmount(0);
+    return 0;
+}
+
 static int test_verify(void)
 {
     struct fat_file root, file;
@@ -426,6 +440,7 @@ int main(int argc, char **argv)
     else if (!strcmp(test, "twofiles")) rc = test_twofiles();
     else if (!strcmp(test, "timestamps")) rc = test_timestamps();
     else if (!strcmp(test, "legacy-duplicate")) rc = test_legacy_duplicate();
+    else if (!strcmp(test, "legacy-baseid")) rc = test_legacy_baseid();
     else if (!strcmp(test, "fault")) rc = test_fault();
     else { fprintf(stderr, "unknown test\n"); return 2; }
     if (save_image(argv[2]))

@@ -124,6 +124,16 @@ class AdapterTests(unittest.TestCase):
           base + entry_start + (b_entry["slot"] + 1) * 320] = raw
         self.run_harness(bytes(b), "legacy-duplicate")
 
+    def test_legacy_backing_id_without_base_flag_is_readable(self):
+        out = self.run_harness(self.image, "twofiles")
+        b = bytearray(out)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        es, _, entry_start, _ = entries(b, base)
+        a = next(e for e in es if e["name"] == b"a.txt")
+        struct.pack_into("<I", b, base + entry_start + a["slot"] * 320 + 12,
+                         16)  # native .rockbox CNID
+        self.run_harness(bytes(b), "legacy-baseid")
+
     def test_timestamps_are_exposed(self):
         self.run_harness(self.image, "timestamps")
 
