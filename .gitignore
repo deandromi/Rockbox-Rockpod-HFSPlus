@@ -336,3 +336,6 @@ __pycache__
 
 # Local XERJ index and memory (semantic project search)
 .xerj-data/
+
+# Machine-local MCP wiring (absolute paths)
+opencode.json

@@ -59,8 +59,17 @@ rationale and hardware notes that are not easily grep-able.
 
 ## MCP for future sessions
 
-The node must be running first. Add a project MCP server entry with an absolute
-path to `tools/xerj/mcp.sh`:
+The node must be running first; `xerj mcp` proxies to it and does not start one.
+
+```sh
+opencode mcp add xerj \
+  --env XERJ_URL=http://127.0.0.1:9200 \
+  -- "$PWD/tools/xerj/mcp.sh"
+opencode mcp list
+```
+
+That writes a project `opencode.json` with an absolute path, so the file is
+machine-specific and git-ignored. By hand it looks like:
 
 ```json
 {
@@ -76,7 +85,8 @@ path to `tools/xerj/mcp.sh`:
 }
 ```
 
-This is optional and requires restarting the OpenCode session.
+OpenCode reloads MCP servers when the config is saved. The wrapper sets
+`XERJ_DISABLE_FEEDBACK=true` so no field report is ever sent.
 
 ## Reindex after changes
 
