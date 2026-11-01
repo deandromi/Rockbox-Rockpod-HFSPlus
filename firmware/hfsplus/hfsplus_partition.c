@@ -51,15 +51,29 @@ static int add(struct hfs_partition *parts, unsigned int cap, int count,
     return count + 1;
 }
 
+static int valid_hfs_header(const uint8_t *b, uint64_t length)
+{
+    if (be16(b) != 0x482b || be16(b + 2) != 4)
+        return 0;
+    uint32_t bs = be32(b + 40), blocks = be32(b + 44);
+    uint32_t free_blocks = be32(b + 48);
+    return bs >= 512 && !(bs & (bs - 1)) && blocks && free_blocks <= blocks &&
+           (uint64_t)blocks * bs <= length;
+}
+
 static int probe(hfs_ro_read_fn read, void *ctx, uint64_t size,
                   uint64_t offset, uint64_t length)
 {
     uint8_t b[512];
     if (length < 1536 || offset > size || length > size - offset)
         return 0;
-    if (bounded(read, ctx, size, offset + 1024, b, 2))
-        return 0;
-    if (be16(b) == 0x482b || be16(b) == 0x4858)
+    /* A signature-only probe can misclassify a damaged/FAT volume and
+     * suppress the generic fallback.  Validate the primary header, then the
+     * alternate header (the torn-primary recovery path). */
+    if (!bounded(read, ctx, size, offset + 1024, b, sizeof(b)) &&
+        (valid_hfs_header(b, length) ||
+         (!bounded(read, ctx, size, offset + length - 1024, b, sizeof(b)) &&
+          valid_hfs_header(b, length))))
         return 0xaf;
     if (bounded(read, ctx, size, offset, b, sizeof(b)))
         return 0;

@@ -9,8 +9,11 @@ import hashlib
 import json
 import shutil
 import struct
+import os
 import tempfile
 from pathlib import Path
+
+import overlay_check
 
 MAGIC = 0x54434810
 NAMES = {'pictureflow.cfg', 'pictureflow_album.idx', 'emptyslide.pfraw'}
@@ -46,29 +49,18 @@ def pool(records, used):
         data.extend(records[seek] + b'\0')
     return bytes(data), offsets
 
-def overlay_conflicts(path):
-    if not path.exists():
-        return []
-    with path.open('rb') as f:
-        h = f.read(40)
-        require(len(h) == 40 and h[:8] == b'RPOVL11\0', 'Unknown overlay header')
-        version, block, count, total, bitmap = struct.unpack_from('<5I', h, 8)
-        require((version, block, count) == (1, 4096, 2048), 'Unknown overlay layout')
-        require(total * block <= path.stat().st_size and bitmap == (total + 7)//8, 'Invalid overlay size')
-        f.seek((1 + (bitmap + block - 1)//block) * block)
-        found = []
-        for slot in range(count):
-            e = f.read(320)
-            require(len(e) == 320, 'Truncated overlay table')
-            ident, parent, flags = struct.unpack_from('<III', e)
-            if not flags & 1:
-                continue
-            length = struct.unpack_from('<H', e, 38)[0]
-            require(length <= 260, 'Invalid overlay name')
-            name = e[40:40 + length].decode('utf-8')
-            if name in NAMES:
-                found.append(dict(slot=slot, id=ident, parent=parent, flags=flags, name=name))
-        return found
+def overlay_conflicts(path, native_ids=None):
+    return overlay_check.conflicts(path, NAMES, native_ids)
+
+def fsync_dir(path):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 def configuration(path, albums):
     text = path.read_text(encoding='utf-8') if path.exists() else ''
@@ -121,7 +113,10 @@ def main():
     cfg = rb/'rocks/demos/pictureflow.cfg'
     outputs = {cache/'pictureflow_album.idx': index, cache/'emptyslide.pfraw': empty,
                cfg: configuration(cfg, len(pairs))}
-    conflicts = overlay_conflicts(root/'.rockpod-rw')
+    # On HFS+, st_ino is the catalog CNID, which is exactly what a tombstone
+    # stores in base_id.  This catches CNID-reuse tombstones, not just names.
+    native_ids = {p.name: p.stat().st_ino for p in outputs if p.exists()}
+    conflicts = overlay_conflicts(root/'.rockpod-rw', native_ids)
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='rockpod-coverflow-', dir=output_dir))
@@ -157,6 +152,7 @@ def main():
             import os
             os.fsync(f.fileno())
         temporary.replace(target)
+        fsync_dir(target.parent)
         require(target.read_bytes() == data, f'Readback failed: {target}')
     print('Installed and read back successfully. Backups:', backup)
     print('Eject cleanly before booting. Rebuild this index after rebuilding the music database.')

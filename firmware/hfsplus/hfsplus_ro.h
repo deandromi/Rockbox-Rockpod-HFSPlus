@@ -8,7 +8,8 @@
 #define HFS_RO_NAME_BYTES 1021
 #define HFS_RO_MAX_NODE_SIZE 32768
 #define HFS_RO_ROOT_ID 2
-#define HFS_RO_DIR_INDEX_MAX 4096
+#define HFS_RO_DIR_INDEX_MAX 16384
+#define HFS_RO_CNID_INDEX_MAX 4096
 
 enum hfs_ro_error {
     HFS_RO_OK = 0,
@@ -44,6 +45,8 @@ struct hfs_ro_entry {
     uint16_t kind;
     uint16_t mode;
     uint8_t unsupported;
+    uint32_t created;   /* HFS+ epoch (1904), 0 if absent */
+    uint32_t modified;
     char name[HFS_RO_NAME_BYTES];
     struct hfs_ro_fork data;
 };
@@ -55,6 +58,13 @@ struct hfs_ro_dirloc {
     uint8_t indexed;
 };
 
+struct hfs_ro_cnidloc {
+    uint32_t id;
+    uint32_t node;
+    uint16_t record;
+    uint16_t used;
+};
+
 struct hfs_ro_volume {
     hfs_ro_read_fn read;
     void *context;
@@ -64,7 +74,16 @@ struct hfs_ro_volume {
     uint32_t blocks;
     uint32_t free_blocks;
     uint32_t attributes;
+    struct hfs_ro_fork alloc;
+    struct hfs_ro_fork extents;
+    struct hfs_ro_fork attrs;
+    struct hfs_ro_fork startup;
     struct hfs_ro_fork catalog;
+    uint64_t journal_offset;
+    uint64_t journal_size;
+    uint64_t journal_info_offset;
+    uint64_t journal_info_size;
+    uint8_t recovery;
     uint32_t first_leaf;
     uint32_t last_leaf;
     uint32_t total_nodes;
@@ -80,6 +99,9 @@ struct hfs_ro_volume {
     struct hfs_ro_dirloc dir_index[HFS_RO_DIR_INDEX_MAX];
     uint16_t dir_index_count;
     uint8_t dir_index_complete;
+    struct hfs_ro_cnidloc cnid_index[HFS_RO_CNID_INDEX_MAX];
+    uint16_t cnid_index_count;
+    uint8_t cnid_index_complete;
     int mounted;
 };
 
@@ -99,6 +121,11 @@ int hfs_ro_mount(struct hfs_ro_volume *volume, hfs_ro_read_fn read,
                  void *scratch, size_t scratch_size);
 void hfs_ro_unmount(struct hfs_ro_volume *volume);
 int hfs_ro_enable_fast_index(struct hfs_ro_volume *volume, void *cache, size_t cache_size);
+/* True when every block in fork is allocated and outside HFS+ metadata. */
+int hfs_ro_fork_writable(const struct hfs_ro_volume *volume,
+                         const struct hfs_ro_fork *fork);
+int hfs_ro_fork_inline(const struct hfs_ro_volume *volume,
+                       const struct hfs_ro_fork *fork);
 int hfs_ro_iter_init(const struct hfs_ro_volume *volume, uint32_t parent,
                      struct hfs_ro_iterator *iterator);
 /* Returns one entry, zero at EOF, or a negative hfs_ro_error. */

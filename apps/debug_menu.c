@@ -1487,22 +1487,21 @@ static int disk_callback(int btn, struct gui_synclist *lists)
 
 #ifdef HAVE_HFSPLUS_RO
     simplelist_addline("HFS+ overlay: %s", hfsplus_overlay_ready(0) ? "READY" : "OFF");
-    simplelist_addline("Overlay stage: %d", hfsplus_overlay_last_stage());
-    simplelist_addline("Overlay error: %d", hfsplus_overlay_last_error());
-    simplelist_addline("Overlay slot: %d", hfsplus_overlay_last_slot());
-    if (hfsplus_overlay_last_stage() == 8) {
+    simplelist_addline("Overlay stage: %d", hfsplus_overlay_last_stage_vol(0));
+    simplelist_addline("Overlay error: %d", hfsplus_overlay_last_error_vol(0));
+    simplelist_addline("Overlay slot: %d", hfsplus_overlay_last_slot_vol(0));
+    if (hfsplus_overlay_last_stage_vol(0) == 8) {
         simplelist_addline("Ovl id/parent: %08lx/%08lx",
-            (unsigned long)hfsplus_overlay_diag_id(),
-            (unsigned long)hfsplus_overlay_diag_parent());
+            (unsigned long)hfsplus_overlay_diag_id_vol(0),
+            (unsigned long)hfsplus_overlay_diag_parent_vol(0));
         simplelist_addline("Ovl flags: %08lx",
-            (unsigned long)hfsplus_overlay_diag_flags());
+            (unsigned long)hfsplus_overlay_diag_flags_vol(0));
         simplelist_addline("Ovl kind/name: %u/%u",
-            hfsplus_overlay_diag_kind(), hfsplus_overlay_diag_name_len());
+            hfsplus_overlay_diag_kind_vol(0), hfsplus_overlay_diag_name_len_vol(0));
         simplelist_addline("Ovl data: %lu+%lu",
-            (unsigned long)hfsplus_overlay_diag_data_start(),
-            (unsigned long)hfsplus_overlay_diag_data_blocks());
+            (unsigned long)hfsplus_overlay_diag_data_start_vol(0),
+            (unsigned long)hfsplus_overlay_diag_data_blocks_vol(0));
     }
-    return btn;
 #endif
     simplelist_addline("SSD detected: %s", ata_disk_isssd() ? "yes" : "no");
     simplelist_addline(

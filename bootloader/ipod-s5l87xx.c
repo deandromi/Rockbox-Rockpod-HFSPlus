@@ -962,7 +962,7 @@ void main(void)
 #endif
         struct partinfo pinfo;
 #ifdef HAVE_HFSPLUS_RO
-        if (hfsplus_last_error()) {
+        if (hfsplus_had_hfs_candidate() && hfsplus_last_error()) {
             if (hfsplus_last_stage() == 1)
                 printf("HFS+ v8 scan error: %d", hfsplus_last_error());
             else if (hfsplus_last_stage() == 2)
@@ -986,7 +986,7 @@ void main(void)
 
 #ifdef HAVE_HFSPLUS_RO
     if (hfsplus_mounted(0))
-        printf("HFS+ read-only test");
+        printf("HFS+ native mount");
 #endif
     printf("Loading Rockbox...");
     unsigned char *loadbuffer = (unsigned char *)DRAM_ORIG;

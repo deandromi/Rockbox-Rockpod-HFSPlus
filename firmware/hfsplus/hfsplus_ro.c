@@ -38,7 +38,7 @@ static int power2(uint32_t n)
     return n && !(n & (n - 1));
 }
 
-static int read_volume(struct hfs_ro_volume *v, uint64_t off,
+static int read_volume(const struct hfs_ro_volume *v, uint64_t off,
                         void *buf, size_t size)
 {
     if (off > v->length || size > v->length - off)
@@ -91,7 +91,8 @@ static int inline_fork(const struct hfs_ro_fork *fork)
     return sum == fork->blocks;
 }
 
-static int read_fork(struct hfs_ro_volume *v, const struct hfs_ro_fork *fork,
+static int read_fork(const struct hfs_ro_volume *v,
+                      const struct hfs_ro_fork *fork,
                       uint64_t off, void *buffer, size_t length)
 {
     uint8_t *out = buffer;
@@ -120,6 +121,104 @@ static int read_fork(struct hfs_ro_volume *v, const struct hfs_ro_fork *fork,
     return length ? HFS_RO_FORMAT : HFS_RO_OK;
 }
 
+int hfs_ro_fork_inline(const struct hfs_ro_volume *volume,
+                       const struct hfs_ro_fork *fork)
+{
+    (void)volume;
+    return fork && inline_fork(fork) ? 1 : 0;
+}
+
+static int fork_overlaps_block(const struct hfs_ro_fork *fork,
+                               uint64_t start, uint64_t count)
+{
+    for (unsigned int i = 0; i < 8; ++i) {
+        uint64_t s = fork->extents[i].start;
+        uint64_t c = fork->extents[i].count;
+        if (c && start < s + c && s < start + count)
+            return 1;
+    }
+    return 0;
+}
+
+static int bitmap_range_allocated(const struct hfs_ro_volume *v,
+                                  uint64_t start, uint64_t count)
+{
+    uint8_t buf[256];
+    uint64_t first = start >> 3;
+    uint64_t last = (start + count - 1) >> 3;
+    uint64_t bitmap_bytes = (v->blocks + 7u) / 8u;
+    if (!count || start >= v->blocks || count > v->blocks - start)
+        return 0;
+    if (first > last || last >= bitmap_bytes)
+        return 0;
+    for (uint64_t pos = first; pos <= last; ) {
+        size_t chunk = (size_t)(last - pos + 1);
+        if (chunk > sizeof(buf))
+            chunk = sizeof(buf);
+        int rc = read_fork(v, &v->alloc, pos, buf, chunk);
+        if (rc)
+            return 0;
+        for (size_t j = 0; j < chunk; ++j) {
+            for (unsigned int bit = 0; bit < 8; ++bit) {
+                uint64_t block = (pos + j) * 8u + bit;
+                if (block < start || block >= start + count)
+                    continue;
+                if (!(buf[j] & (uint8_t)(1u << (7u - bit))))
+                    return 0;
+            }
+        }
+        pos += chunk;
+    }
+    return 1;
+}
+
+int hfs_ro_fork_writable(const struct hfs_ro_volume *v,
+                         const struct hfs_ro_fork *fork)
+{
+    if (!v || !v->mounted || !fork)
+        return HFS_RO_ARGUMENT;
+    if (v->recovery)
+        return HFS_RO_UNSUPPORTED;
+    if (!inline_fork(fork) || !inline_fork(&v->alloc))
+        return HFS_RO_UNSUPPORTED;
+    if (v->alloc.size < ((uint64_t)v->blocks + 7u) / 8u)
+        return HFS_RO_UNSUPPORTED;
+
+    for (unsigned int i = 0; i < 8; ++i) {
+        uint64_t start = fork->extents[i].start;
+        uint64_t count = fork->extents[i].count;
+        if (!count)
+            continue;
+        if (start >= v->blocks || count > v->blocks - start)
+            return HFS_RO_FORMAT;
+        uint64_t begin = start * (uint64_t)v->block_size;
+        uint64_t bytes = count * (uint64_t)v->block_size;
+        /* Reserve the boot blocks/primary volume header and the alternate
+         * volume header.  The exact byte ranges matter for 512-byte blocks. */
+        if (begin < 2048 || begin + bytes > v->length - 1024)
+            return HFS_RO_FORMAT;
+        if (v->journal_info_size) {
+            if (begin < v->journal_info_offset + v->journal_info_size &&
+                v->journal_info_offset < begin + bytes)
+                return HFS_RO_FORMAT;
+        }
+        if (v->journal_size) {
+            if (begin < v->journal_offset + v->journal_size &&
+                v->journal_offset < begin + bytes)
+                return HFS_RO_FORMAT;
+        }
+        if (fork_overlaps_block(&v->catalog, start, count) ||
+            fork_overlaps_block(&v->extents, start, count) ||
+            fork_overlaps_block(&v->attrs, start, count) ||
+            fork_overlaps_block(&v->startup, start, count) ||
+            fork_overlaps_block(&v->alloc, start, count))
+            return HFS_RO_FORMAT;
+        if (!bitmap_range_allocated(v, start, count))
+            return HFS_RO_FORMAT;
+    }
+    return HFS_RO_OK;
+}
+
 static int check_journal(struct hfs_ro_volume *v, uint32_t info_block)
 {
     uint8_t info[52], header[44];
@@ -129,8 +228,14 @@ static int check_journal(struct hfs_ro_volume *v, uint32_t info_block)
                          info, sizeof(info));
     if (rc)
         return rc;
-    if (be32(info) != 1)
+    uint32_t flags = be32(info);
+    /* kJIJournalInFSMask=1, kJIJournalOnOtherDeviceMask=2,
+     * kJIJournalNeedInitMask=4.  An in-filesystem journal is supported;
+     * external or uninitialised journals are not. */
+    if ((flags & 2u) || !(flags & 1u))
         return HFS_RO_UNSUPPORTED;
+    if (flags & 4u)
+        return HFS_RO_DIRTY;
     uint64_t offset = be64(info + 36), size = be64(info + 44);
     if (size < 1024 || offset < 1536 || offset % 512 || size % 512 ||
         offset > v->length || size > v->length - offset)
@@ -160,24 +265,44 @@ static int check_journal(struct hfs_ro_volume *v, uint32_t info_block)
         sum = (sum << 8) ^ (sum + header[i]);
     if (~sum != expected)
         return HFS_RO_FORMAT;
+    v->journal_info_offset = (uint64_t)info_block * v->block_size;
+    v->journal_info_size = v->block_size;
+    v->journal_offset = offset;
+    v->journal_size = size;
     return start == end ? HFS_RO_OK : HFS_RO_DIRTY;
 }
+
+static const uint8_t *validated_node;
+static uint16_t validated_node_size;
+static uint16_t validated_node_count;
+static uint8_t validated_node_offsets;
 
 static int node_record(const uint8_t *node, uint16_t size, uint16_t index,
                         const uint8_t **record, size_t *length)
 {
-    unsigned int count = be16(node + 10);
-    if (count > (size - 14u) / 2u - 1u || index >= count)
+    if (!node || size < 16)
         return HFS_RO_FORMAT;
-    unsigned int table = size - 2u * (count + 1u);
-    unsigned int prev = 14;
-    for (unsigned int i = 0; i <= count; ++i) {
-        unsigned int off = be16(node + size - 2u * (i + 1u));
-        if (off < prev || off > table || off % 2 ||
-            (i == 0 && off != 14) || (i && off == prev))
+    if (!validated_node_offsets || node != validated_node ||
+        size != validated_node_size) {
+        unsigned int count = be16(node + 10);
+        if (count > (size - 14u) / 2u - 1u)
             return HFS_RO_FORMAT;
-        prev = off;
+        unsigned int table = size - 2u * (count + 1u);
+        unsigned int prev = 14;
+        for (unsigned int i = 0; i <= count; ++i) {
+            unsigned int off = be16(node + size - 2u * (i + 1u));
+            if (off < prev || off > table || off % 2 ||
+                (i == 0 && off != 14) || (i && off == prev))
+                return HFS_RO_FORMAT;
+            prev = off;
+        }
+        validated_node = node;
+        validated_node_size = size;
+        validated_node_count = (uint16_t)count;
+        validated_node_offsets = 1;
     }
+    if (index >= validated_node_count)
+        return HFS_RO_FORMAT;
     unsigned int begin = be16(node + size - 2u * (index + 1u));
     unsigned int end = be16(node + size - 2u * (index + 2u));
     *record = node + begin;
@@ -201,11 +326,13 @@ static int read_catalog_node(struct hfs_ro_volume *v, uint32_t node,
                 return rc;
             v->catalog_cache_node = node;
         }
+        validated_node_offsets = 0;
         *out = v->catalog_cache;
         return HFS_RO_OK;
     }
     int rc = read_fork(v, &v->catalog, (uint64_t)node * v->node_size,
                        v->scratch, v->node_size);
+    validated_node_offsets = 0;
     if (!rc)
         *out = v->scratch;
     return rc;
@@ -224,10 +351,40 @@ static int record_parent_kind(const uint8_t *record, size_t length,
     return HFS_RO_OK;
 }
 
+static unsigned int cnid_bucket(uint32_t id)
+{
+    return (id * 2654435761u) & (HFS_RO_CNID_INDEX_MAX - 1u);
+}
+
+/* Returns 1 on insert, 0 when the fixed table is full, -1 on duplicate. */
+static int cnid_index_add(struct hfs_ro_volume *v, uint32_t id,
+                          uint32_t node, uint16_t record)
+{
+    unsigned int b = cnid_bucket(id);
+    for (unsigned int n = 0; n < HFS_RO_CNID_INDEX_MAX; ++n) {
+        struct hfs_ro_cnidloc *e = &v->cnid_index[b];
+        if (!e->used) {
+            e->id = id;
+            e->node = node;
+            e->record = record;
+            e->used = 1;
+            ++v->cnid_index_count;
+            return 1;
+        }
+        if (e->id == id)
+            return -1;
+        b = (b + 1u) & (HFS_RO_CNID_INDEX_MAX - 1u);
+    }
+    return 0;
+}
+
 static int build_dir_index(struct hfs_ro_volume *v)
 {
     v->dir_index_count = 0;
     v->dir_index_complete = 1;
+    memset(v->cnid_index, 0, sizeof(v->cnid_index));
+    v->cnid_index_count = 0;
+    v->cnid_index_complete = 1;
     uint32_t node = v->first_leaf, previous = 0, visited = 0, seen = 0;
     uint32_t last_parent = 0, previous_parent = 0;
     while (node) {
@@ -266,6 +423,13 @@ static int build_dir_index(struct hfs_ro_volume *v)
             rc = parse_record(v, record, length, &validated);
             if (rc < 0)
                 return rc;
+            if (rc == 1) {
+                int added = cnid_index_add(v, validated.id, node, i);
+                if (added < 0)
+                    return HFS_RO_FORMAT;
+                if (!added)
+                    v->cnid_index_complete = 0;
+            }
             /* Only normal file/folder records describe children. Thread
              * records would otherwise add one pseudo-parent per object. */
             if ((kind == 1 || kind == 2) && parent != last_parent) {
@@ -318,6 +482,7 @@ static int read_catalog_header(struct hfs_ro_volume *v)
         return HFS_RO_FORMAT;
     const uint8_t *h;
     size_t length;
+    validated_node_offsets = 0;
     rc = node_record(v->scratch, size, 0, &h, &length);
     if (rc || length < 106)
         return HFS_RO_FORMAT;
@@ -338,6 +503,65 @@ static int read_catalog_header(struct hfs_ro_volume *v)
     return HFS_RO_OK;
 }
 
+static void volume_reset(struct hfs_ro_volume *v, hfs_ro_read_fn read,
+                         void *context, uint64_t base, uint64_t length,
+                         void *scratch, size_t scratch_size)
+{
+    memset(v, 0, sizeof(*v));
+    v->read = read;
+    v->context = context;
+    v->base = base;
+    v->length = length;
+    v->scratch = scratch;
+    v->scratch_size = scratch_size;
+}
+
+static int parse_volume_header(struct hfs_ro_volume *v, const uint8_t *header,
+                               uint64_t partition_length, int recovery)
+{
+    if (be16(header) != 0x482b || be16(header + 2) != 4)
+        return HFS_RO_UNSUPPORTED;
+    v->attributes = be32(header + 4);
+    v->block_size = be32(header + 40);
+    v->blocks = be32(header + 44);
+    v->free_blocks = be32(header + 48);
+    if (!power2(v->block_size) || v->block_size < 512 || !v->blocks ||
+        v->free_blocks > v->blocks ||
+        (uint64_t)v->blocks * v->block_size > partition_length)
+        return HFS_RO_FORMAT;
+    v->length = (uint64_t)v->blocks * v->block_size;
+    v->recovery = recovery ? 1 : 0;
+    if (!(v->attributes & (1u << 8)) || (v->attributes & (1u << 11)))
+        return HFS_RO_DIRTY;
+    if (v->attributes & (1u << 13)) {
+        if (be32(header + 8) != 0x4846534au)
+            return HFS_RO_UNSUPPORTED;
+        int rc = check_journal(v, be32(header + 12));
+        if (rc)
+            return rc;
+    }
+    int rc = parse_fork(v, header + 112, &v->alloc);
+    if (rc)
+        return rc;
+    rc = parse_fork(v, header + 192, &v->extents);
+    if (rc)
+        return rc;
+    rc = parse_fork(v, header + 352, &v->attrs);
+    if (rc)
+        return rc;
+    rc = parse_fork(v, header + 432, &v->startup);
+    if (rc)
+        return rc;
+    rc = parse_fork(v, header + 272, &v->catalog);
+    if (rc)
+        return rc;
+    rc = read_catalog_header(v);
+    if (rc)
+        return rc;
+    v->mounted = 1;
+    return HFS_RO_OK;
+}
+
 int hfs_ro_mount(struct hfs_ro_volume *v, hfs_ro_read_fn read,
                  void *context, uint64_t base, uint64_t length,
                  void *scratch, size_t scratch_size)
@@ -347,44 +571,36 @@ int hfs_ro_mount(struct hfs_ro_volume *v, hfs_ro_read_fn read,
     memset(v, 0, sizeof(*v));
     if (!read || !scratch || length < 2048 || base > UINT64_MAX - length)
         return HFS_RO_ARGUMENT;
-    v->read = read;
-    v->context = context;
-    v->base = base;
-    v->length = length;
-    v->scratch = scratch;
-    v->scratch_size = scratch_size;
-    uint8_t header[512];
-    int rc = read_volume(v, 1024, header, sizeof(header));
-    if (rc)
-        return rc;
-    if (be16(header) != 0x482b || be16(header + 2) != 4)
-        return HFS_RO_UNSUPPORTED;
-    v->attributes = be32(header + 4);
-    v->block_size = be32(header + 40);
-    v->blocks = be32(header + 44);
-    v->free_blocks = be32(header + 48);
-    if (!power2(v->block_size) || v->block_size < 512 || !v->blocks ||
-        v->free_blocks > v->blocks ||
-        (uint64_t)v->blocks * v->block_size > length)
-        return HFS_RO_FORMAT;
-    v->length = (uint64_t)v->blocks * v->block_size;
-    if (!(v->attributes & (1u << 8)) || (v->attributes & (1u << 11)))
-        return HFS_RO_DIRTY;
-    if (v->attributes & (1u << 13)) {
-        if (be32(header + 8) != 0x4846534au)
-            return HFS_RO_UNSUPPORTED;
-        rc = check_journal(v, be32(header + 12));
-        if (rc)
+    volume_reset(v, read, context, base, length, scratch, scratch_size);
+    uint8_t primary[512], alternate[512];
+    int prc = read_volume(v, 1024, primary, sizeof(primary));
+
+    int rc = prc ? prc : HFS_RO_UNSUPPORTED;
+    if (!prc && be16(primary) == 0x482b && be16(primary + 2) == 4) {
+        rc = parse_volume_header(v, primary, length, 0);
+        if (!rc)
+            return HFS_RO_OK;
+        /* Only a torn/format-invalid primary may fall back to the alternate.
+         * Dirty or unsupported volumes stay dirty/unsupported: the alternate
+         * header cannot make pending journal data safe to ignore. */
+        if (rc != HFS_RO_IO && rc != HFS_RO_FORMAT)
             return rc;
+    } else if (!prc && be16(primary) == 0x4858) {
+        return HFS_RO_UNSUPPORTED; /* HFSX is not supported. */
     }
-    rc = parse_fork(v, header + 272, &v->catalog);
-    if (rc)
-        return rc;
-    rc = read_catalog_header(v);
-    if (rc)
-        return rc;
-    v->mounted = 1;
-    return HFS_RO_OK;
+
+    int arc = read_volume(v, length - 1024, alternate, sizeof(alternate));
+    if (!arc && be16(alternate) == 0x482b && be16(alternate + 2) == 4) {
+        volume_reset(v, read, context, base, length, scratch, scratch_size);
+        int alt = parse_volume_header(v, alternate, length, 1);
+        if (!alt)
+            return HFS_RO_OK;
+        if (rc == HFS_RO_UNSUPPORTED || rc == HFS_RO_IO ||
+            rc == HFS_RO_FORMAT)
+            rc = alt;
+    }
+    v->mounted = 0;
+    return rc;
 }
 
 void hfs_ro_unmount(struct hfs_ro_volume *v)
@@ -459,6 +675,8 @@ static int parse_record(struct hfs_ro_volume *v, const uint8_t *p,
     e->kind = kind;
     e->id = be32(data + 8);
     e->parent = be32(p + 2);
+    e->created = be32(data + 12);
+    e->modified = be32(data + 16);
     e->mode = be16(data + 42);
     if (!e->parent || e->id < 2)
         return HFS_RO_FORMAT;
@@ -473,6 +691,12 @@ static int parse_record(struct hfs_ro_volume *v, const uint8_t *p,
         rc = parse_fork(v, data + 88, &e->data);
         if (rc)
             return rc;
+        /* A fork with more logical blocks than its eight extent descriptors
+         * can address needs the extents-overflow tree, which this reader does
+         * not implement.  Mark it unsupported at open instead of failing at a
+         * later read/write. */
+        if (!inline_fork(&e->data))
+            e->unsupported = 1;
         uint16_t mode_type = e->mode & 0170000;
         e->unsupported |= (mode_type && mode_type != 0100000) ||
             (data[41] & 0x20) ||
@@ -594,6 +818,33 @@ int hfs_ro_find_id(struct hfs_ro_volume *v, uint32_t id,
         entry->kind = 1;
         strcpy(entry->name, "/");
         return HFS_RO_OK;
+    }
+    if (v->cnid_index_count) {
+        unsigned int b = cnid_bucket(id);
+        for (unsigned int n = 0; n < HFS_RO_CNID_INDEX_MAX; ++n) {
+            const struct hfs_ro_cnidloc *loc = &v->cnid_index[b];
+            if (!loc->used)
+                break;
+            if (loc->id == id) {
+                const uint8_t *nptr;
+                int rc = read_catalog_node(v, loc->node, &nptr);
+                if (rc)
+                    return rc;
+                const uint8_t *record;
+                size_t length;
+                rc = node_record(nptr, v->node_size, loc->record,
+                                 &record, &length);
+                if (rc)
+                    return rc;
+                rc = parse_record(v, record, length, entry);
+                if (rc < 0)
+                    return rc;
+                return rc == 1 && entry->id == id ? HFS_RO_OK : HFS_RO_FORMAT;
+            }
+            b = (b + 1u) & (HFS_RO_CNID_INDEX_MAX - 1u);
+        }
+        if (v->cnid_index_complete)
+            return HFS_RO_NOT_FOUND;
     }
     uint32_t node = v->first_leaf, previous = 0, visited = 0, seen = 0;
     while (node) {

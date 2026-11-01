@@ -758,11 +758,20 @@ static bool progress_cancel(int step, int count, char *msg)
     return false;
 }
 
+static bool configfile_save_checked(void)
+{
+    if (configfile_save(CONFIG_FILE, config, CONFIG_NUM_ITEMS,
+                        CONFIG_VERSION) >= 0)
+        return true;
+    rb->splash(HZ, ID2P(LANG_ERROR_WRITING_CONFIG));
+    return false;
+}
+
 static void config_save(int cache_version, bool update_albumart)
 {
     pf_cfg.cache_version = cache_version;
     pf_cfg.update_albumart = update_albumart;
-    configfile_save(CONFIG_FILE, config, CONFIG_NUM_ITEMS, CONFIG_VERSION);
+    configfile_save_checked();
 }
 
 static void config_set_defaults(struct pf_config_t *cfg)
@@ -1215,9 +1224,11 @@ static void write_album_index(int idx, int name_idx,
     pf_idx.album_index[idx].year = 0;
 }
 
-static inline void write_album_entry(struct tagcache_search *tcs,
-                                     int name_idx, unsigned int len)
+static inline int write_album_entry(struct tagcache_search *tcs,
+                                    int name_idx, unsigned int len)
 {
+    if (pf_idx.album_ct == 0xffffu)
+        return ERROR_BUFFER_FULL;
     write_album_index(-pf_idx.album_ct, name_idx, tcs->result_seek, 0, -1);
     pf_idx.album_len += len;
     pf_idx.album_ct++;
@@ -1227,15 +1238,19 @@ static inline void write_album_entry(struct tagcache_search *tcs,
         pf_idx.album_untagged_idx = name_idx;
         pf_idx.album_untagged_seek = tcs->result_seek;
     }
+    return SUCCESS;
 }
 
-static void write_artist_entry(struct tagcache_search *tcs,
-                               int name_idx, unsigned int len)
+static int write_artist_entry(struct tagcache_search *tcs,
+                              int name_idx, unsigned int len)
 {
+    if (pf_idx.artist_ct == 0xffffu)
+        return ERROR_BUFFER_FULL;
     pf_idx.artist_index[-pf_idx.artist_ct].name_idx = name_idx;
     pf_idx.artist_index[-pf_idx.artist_ct].seek = tcs->result_seek;
     pf_idx.artist_len += len;
     pf_idx.artist_ct++;
+    return SUCCESS;
 }
 
 /* adds tagcache_search results into artist/album index */
@@ -1246,7 +1261,7 @@ static int get_tcs_search_res(int type, struct tagcache_search *tcs,
     const long tcs_bufsz = sizeof(tcs_buf);
     int ret = SUCCESS;
     unsigned int l, name_idx = 0;
-    void (*writefn)(struct tagcache_search *, int, unsigned int);
+    int (*writefn)(struct tagcache_search *, int, unsigned int);
     int data_size;
     if (type == ePFS_ARTIST)
     {
@@ -1289,7 +1304,9 @@ static int get_tcs_search_res(int type, struct tagcache_search *tcs,
         *bufsz -= l;
         *buf = l + (char *)*buf;
 
-        writefn(tcs, name_idx, l);
+        ret = writefn(tcs, name_idx, l);
+        if (ret < 0)
+            break;
 
         name_idx += l;
     }
@@ -1343,6 +1360,10 @@ static int create_album_untagged(struct tagcache_search *tcs,
             }
 
             *bufsz -= sizeof(struct album_data);
+            if (pf_idx.album_ct == 0xffffu) {
+                ret = ERROR_BUFFER_FULL;
+                break;
+            }
             write_album_index(-pf_idx.album_ct, pf_idx.album_untagged_idx,
                                pf_idx.album_untagged_seek, -1, tcs->result_seek);
 
@@ -2443,12 +2464,27 @@ static bool incremental_albumart_cache(bool verbose)
 
         goto aa_failure;
     }
-    rb->remove(aa_cache.pfraw_file);
-
-    if (!save_pfraw(aa_cache.pfraw_file, &aa_cache.input_bmp))
     {
-        if (verbose) { rb->splash(HZ, "Could not write bmp"); }
-        goto aa_failure;
+        char temporary[MAX_PATH], backup[MAX_PATH];
+        rb->snprintf(temporary, sizeof(temporary), "%s.tmp",
+                     aa_cache.pfraw_file);
+        rb->snprintf(backup, sizeof(backup), "%s.old",
+                     aa_cache.pfraw_file);
+        rb->remove(backup);
+        bool had_old = rb->file_exists(aa_cache.pfraw_file);
+        if (had_old && rb->rename(aa_cache.pfraw_file, backup) < 0)
+            goto aa_failure;
+        if (!save_pfraw(temporary, &aa_cache.input_bmp) ||
+            rb->rename(temporary, aa_cache.pfraw_file) < 0)
+        {
+            rb->remove(temporary);
+            if (had_old)
+                rb->rename(backup, aa_cache.pfraw_file);
+            if (verbose) { rb->splash(HZ, "Could not write bmp"); }
+            goto aa_failure;
+        }
+        if (had_old)
+            rb->remove(backup);
     }
     aa_cache.slides++;
 
@@ -2456,16 +2492,14 @@ aa_failure:
     if (verbose)
     {
         if (aa_cache.inspected >= pf_idx.album_ct)
-            configfile_save(CONFIG_FILE, config, CONFIG_NUM_ITEMS,
-                            CONFIG_VERSION);
+            configfile_save_checked();
         return false;
     }
 
 aa_success:
     if (aa_cache.inspected >= pf_idx.album_ct)
     {
-        configfile_save(CONFIG_FILE, config, CONFIG_NUM_ITEMS,
-                            CONFIG_VERSION);
+        configfile_save_checked();
         free_all_slide_prio(0);
         if (pf_state == pf_idle)
             rb->queue_post(&thread_q, EV_WAKEUP, 0);
@@ -3969,16 +4003,14 @@ static int display_settings_menu(void)
                 pf_cfg.update_albumart = false;
                 pf_cfg.cache_version = CACHE_REBUILD;
                 rb->remove(EMPTY_SLIDE);
-                configfile_save(CONFIG_FILE, config,
-                                CONFIG_NUM_ITEMS, CONFIG_VERSION);
+                configfile_save_checked();
                 return -3; /* re-init */
             case 6:
                 old_val = pf_cfg.show_statusbar;
                 rb->set_bool("Show Statusbar", &pf_cfg.show_statusbar);
                 if (old_val != pf_cfg.show_statusbar)
                 {
-                    configfile_save(CONFIG_FILE, config,
-                                    CONFIG_NUM_ITEMS, CONFIG_VERSION);
+                    configfile_save_checked();
                     return -3; /* re-init to recompute layout */
                 }
                 break;
@@ -4173,8 +4205,7 @@ static int main_menu(void)
                 pf_cfg.update_albumart = false;
                 pf_cfg.cache_version = CACHE_REBUILD;
                 rb->remove(EMPTY_SLIDE);
-                configfile_save(CONFIG_FILE, config,
-                                CONFIG_NUM_ITEMS, CONFIG_VERSION);
+                configfile_save_checked();
                 return -3; /* re-init */
             case PF_UPDATE_CACHE:
                 if (!rb->yesno_pop_confirm(ID2P(LANG_UPDATE_CACHE)))
@@ -4182,8 +4213,7 @@ static int main_menu(void)
                 pf_cfg.update_albumart = true;
                 pf_cfg.cache_version = CACHE_REBUILD;
                 rb->remove(EMPTY_SLIDE);
-                configfile_save(CONFIG_FILE, config,
-                                CONFIG_NUM_ITEMS, CONFIG_VERSION);
+                configfile_save_checked();
                 return -3; /* re-init */
             case PF_MENU_SETTINGS:
                 result = settings_menu();
@@ -5205,7 +5235,7 @@ static bool prompt_reinit(void)
         pf_cfg.update_albumart = true;
         pf_cfg.cache_version = CACHE_REBUILD;
         rb->remove(EMPTY_SLIDE);
-        configfile_save(CONFIG_FILE, config, CONFIG_NUM_ITEMS, CONFIG_VERSION);
+        configfile_save_checked();
         if (!reinit())
             return false;
     }

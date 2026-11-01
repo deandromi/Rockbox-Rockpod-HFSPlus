@@ -2,7 +2,7 @@
 
 Status: source-derived, reviewed 2026-11-01.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public release identity: **Stable V1.0 // Version V12.0** (`docs/VERSION` is `1.0-v12.0`).
+Public release identity: **Stable V2.0 // Version V12.2** (`docs/VERSION` is `2.0-v12.2`).
 This checkout is a source snapshot without `.git` metadata. Do not assume commit history, branches, or a clean diff exists.
 
 This file is the operating contract for AI agents and maintainers. Read it before changing code. It explains what is custom, what is inherited, what must never be broken, and where the sharp edges are.
@@ -538,7 +538,7 @@ Overlay slot: -1
 
 This section applies the `thermo-nuclear-code-quality-review` standard: prioritize structural simplification, deletion of accidental complexity, and file-size discipline over cosmetic nits. The review below is deliberately blunt. There is no VCS diff in this snapshot, so the audit targets the custom HFS+ implementation and its integration points, not a branch delta.
 
-The living, evidence-backed bug log is **`docs/hfsplus-audit.md`**. It contains the confirmed S0/S1/S2 findings, reproduction details, verified-good paths and test gaps. V1.1 applies the release-blocking subset (HFS-001–HFS-133 as marked in `BUGFIXES.md`); remaining OPEN findings are still real. The tables below are the high-level summary and must stay in sync with that log.
+The living, evidence-backed bug log is **`docs/hfsplus-audit.md`**. It contains the confirmed S0/S1/S2 findings, reproduction details, verified-good paths and test gaps. V2.0 addresses all remaining audit findings; six unavoidable format/compatibility limits are marked DOCUMENTED in `BUGFIXES.md`. The tables below are the high-level summary and must stay in sync with that log.
 
 ### 8.1 Presumptive blockers
 
@@ -757,6 +757,7 @@ Stop and ask the user when:
 | `docs/hfsplus-audit.md` | Evidence-backed bug audit log; keep it current while fixing. |
 | `docs/ipod-device-investigation.md` | Read-only snapshot of the connected iPod: native fsck, overlay parse, `.rockbox` visibility and next safe tests. |
 | `docs/release-v1.1.md` | Release notes, fixed audit IDs and verification checklist for V1.1. |
+| `docs/release-v2.0.md` | Release notes, fixed audit IDs, documented limits and verification checklist for V2.0. |
 | `tools/database/` | Mac/PCTOOL tagcache database builder. |
 | `uisimulator/common/filesystem-sim.{c,h}` | Restored upstream host filesystem glue used by `DBTOOL`; not part of the ARM firmware. |
 | `tools/rockpod/` | Mac Cover Flow index and `.pfraw` cache builders. |
@@ -784,4 +785,4 @@ Stop and ask the user when:
 - **BASE**: An overlay entry that still refers to a native object and has not been materialized.
 - **Materialize**: Copy the native fork into overlay blocks so it can be modified.
 - **Journal**: HFS+ metadata journal. Read for cleanliness, never replayed.
-- **`RPOVL11`**: Internal overlay magic/format identifier, not the public release version.
+- **`RPOVL11` / `RPOVL12`**: Internal overlay magic/format identifiers (v1 legacy, v2 checksummed/backup), not the public release version.

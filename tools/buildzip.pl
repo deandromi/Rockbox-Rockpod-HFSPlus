@@ -54,10 +54,21 @@ sub glob_install {
     return 1;
 }
 
+sub junk_path {
+    my ($path) = @_;
+    my $name = $path;
+    $name =~ s{.*/}{};
+    return 1 if $name eq '.DS_Store' || $name =~ /^\._/;
+    return 1 if $name eq '.git' || $name eq '.svn' || $name eq '.hg';
+    return 1 if $name =~ /\.(orig|rej)$/;
+    return 0;
+}
+
 sub glob_copy {
     my ($pattern, $destination) = @_;
     print "glob_copy: $pattern -> $destination\n" if $verbose;
     foreach my $path (glob($pattern)) {
+        next if junk_path($path);
         copy($path, $destination);
     }
 }
@@ -72,6 +83,10 @@ sub tree_copy {
         wanted => sub {
             my $path = $File::Find::name;
             return if $path eq $root;
+            if (junk_path($path)) {
+                $File::Find::prune = 1 if -d $path;
+                return;
+            }
             my $rel = substr($path, length($root));
             $rel =~ s{^/}{};
             my $dest = "$destination/$rel";
@@ -108,6 +123,7 @@ sub find_copyfile {
     print "find_copyfile: $pattern -> $destination\n" if $verbose;
     return sub {
         my $path = $_;
+        return if junk_path($path);
         my $source = getcwd();
         if ($path =~ $pattern && filesize($path) > 0 && !($path =~ /$rbdir/)) {
             if($mklinks) {

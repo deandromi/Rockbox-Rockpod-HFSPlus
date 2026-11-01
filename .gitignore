@@ -331,3 +331,5 @@ __pycache__
 *.rej
 *.dSYM/
 .DS_Store
+
+/tools/hfsplus/tests/adapter_host

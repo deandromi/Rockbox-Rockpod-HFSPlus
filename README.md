@@ -1,12 +1,12 @@
 # Rockpod HFS+
 
-**Stable V1.1 // Version V12.1**
+**Stable V2.0 // Version V12.2**
 
-Rockpod HFS+ is a firmware variant based on [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org), for the iPod Classic `ipod6g` target. It adds an HFS+ reader, an HFS+-aware bootloader, and a writable overlay for firmware settings, databases, playlists and other files created on the player. The release incorporates the development fixes through v12.17 plus the V1.1 overlay, namespace, bootloader and PictureFlow safety fixes; the public release name is Stable V1.1 // Version V12.1.
+Rockpod HFS+ is a firmware variant based on [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org), for the iPod Classic `ipod6g` target. It adds an HFS+ reader, an HFS+-aware bootloader, and a writable overlay for firmware settings, databases, playlists and other files created on the player. The release incorporates the development fixes through v12.17 plus the V1.1 and V2.0 overlay, namespace, bootloader, PictureFlow and filesystem-safety fixes; the public release name is Stable V2.0 // Version V12.2.
 
 The working firmware has been built on macOS and tested on one iPod Classic 6G. Playback through the database and Cover Flow, configuration writes, and Now Playing album art have been confirmed on that device. “Stable” identifies this project's supported release line, not a certification of every iPod Classic revision, storage adapter or HFS+ volume layout.
 
-**V1.1 safety maintenance:** this release closes the first batch of release-blocking audit findings, including overlay validation/commit ordering, long-name bounds, directory-rename namespace stability, bootloader native-only mounting, PictureFlow index/cache bounds, overlay fail-closed behavior, catalog key-order validation, and settings commit durability. The complete list and remaining items are in `BUGFIXES.md` and `docs/hfsplus-audit.md`.
+**V2.0 filesystem hardening:** this release closes the remaining findings from the HFS+ audit. It adds native allocation-file and metadata-range validation, alternate-volume-header recovery, a checksummed overlay header with a backup copy, overlay ownership/ENOSPC/diagnostic fixes, a committed host adapter and fault-injection harness, timestamp exposure, partition-probe validation, and atomic PictureFlow/cache installs. Six unavoidable format/compatibility limits are documented in `BUGFIXES.md`; unsafe cases are rejected instead of accepted silently.
 
 **I made this HFS+ version of rockpod/rockbox on myself, A.I. was only used for bug fixing, cleaning up the code and the initial commit to the repository.** The reason I started tinkering with rockpod was because FAT32 would be extremely unstable on my iPod and would occasionally corrupt my file system. Even if you don't have any problems with FAT32 on your iPod whatsoever, I very much recommend trying this firmware and bootloader out. Because eventually, in my experience, *FAT32 always corrupts*. And please keep in mind, this installing process requires formatting which wipes any previous information, music, photography etc. from your iPod. I recommend formatting your iPod in the terminal (diskutil) instead of the macOS gui application. The GUI application seems to have a habit for formatting the iPod to something, other than HFS.
 
@@ -37,7 +37,7 @@ The base music library and files copied by macOS remain ordinary HFS+ files. Roc
 
 The overlay stores its own allocation bitmap, entry table, file data and deletion records. It does not make native changes to the HFS+ catalog, allocation bitmap or journal. The base namespace can therefore remain readable by macOS while Rockpod stores its writable state in the container.
 
-The adapter also retains an older path for same-size writes to existing files with supported inline extents. The distinction is relevant to backup and recovery: an unavailable overlay prevents normal file creation and growth, but does not turn every possible adapter write into a read-only operation.
+When the container is absent or invalid, the adapter keeps the native namespace readable for diagnostics but disables all writes; it never falls back to modifying the native HFS+ catalog. A valid overlay is required for normal file creation, growth, rename and removal.
 
 macOS sees `.rockpod-rw` as one file. It does not expose the overlay's internal files in Finder. A `config.cfg` visible in `.rockbox` on the Mac can therefore differ from the configuration currently selected by Rockpod. An overlay entry can also shadow a base file with the same logical path. Copying a file onto the Mac-visible volume does not automatically remove that overlay entry.
 
@@ -70,9 +70,13 @@ HFS+ is could be a remedy for failing storage or a loose cable on the inside of 
 - The firmware target is `ipod6g`, with 64 MiB of memory in this source configuration. This is not an installation package for a Nano, Video or another Rockbox target.
 - The confirmed hardware test is an iPod Classic 6G. Other Classic revisions and storage combinations require testing.
 - HFS+ version 4 is supported; APFS and HFSX are not supported volume formats.
-- The reader contains APM, MBR, primary GPT and raw-volume parsing. The adapter also contains iPod-specific sector-layout handling. This does not establish that every combination of partition map and sector size is supported on hardware.
+- The reader contains APM, MBR, primary GPT and raw-volume parsing. The HFS+ build uses this canonical scanner for non-HFS partition types as well; there is no separate legacy FAT scanner. The adapter also contains iPod-specific sector-layout handling. This does not establish that every combination of partition map and sector size is supported on hardware.
 - The volume must have been unmounted cleanly. Supported journaled volumes must have an internal, initialized and empty journal with valid metadata. Pending transactions are not replayed.
-- The reader uses up to eight inline data-fork extents. Files requiring the extents-overflow tree are unsupported, including an overlay container whose allocation cannot be described by its inline extents.
+- The reader uses up to eight inline data-fork extents. Files requiring the extents-overflow tree are unsupported, including an overlay container whose allocation cannot be described by its inline extents. Non-inline files are marked unsupported at open rather than failing later.
+- Name lookup is exact-byte. HFS+ Unicode normalization and case folding are not implemented; create/rename/lookup must use the same byte spelling. `/` and `:` are mapped for the FAT-compatible namespace, which limits some legal HFS+ names.
+- Logical extent order is taken from the fork record. Overlapping, out-of-range and metadata-overlapping extents are rejected, but a non-overlapping reorder cannot be detected without a data checksum; run `fsck_hfs`/`diskutil verifyVolume` after native metadata damage.
+- Extended/logical MBR partitions are not traversed. The supported iPod layouts use APM, primary GPT or primary MBR entries.
+- The reader exposes file modification timestamps. Volume labels, volume creation dates and POSIX permissions are not exposed to Rockbox.
 - Resource forks, filesystem symlinks, hardlinks, macOS compression, encryption and HFS wrappers are unsupported.
 - The adapter retains size and naming restrictions from its FAT compatibility interface.
 
@@ -386,7 +390,7 @@ Store music in ordinary album directories on the base HFS+ volume, for example:
 
 The Rockbox music database contains the audio tags used by **Database** and Cover Flow. Build it with the native `database.ipod6g` program described above. The Python **index** script then creates PictureFlow's album index from the completed music database; the Python **cache** script creates the `.pfraw` covers. Neither Python script scans and builds the Rockbox music database itself.
 
-For Stable V1.1, use **Mac database → Mac PictureFlow index → Mac artwork cache → clean eject → playback**. Do not use **Initialize Now** or **Update Now** on the iPod as part of this workflow: rebuilding there was extremely unstable on the tested device. In **Settings → General Settings → Database**, keep **Auto Update** set to **No**. For the initial database verification, leave **Load to RAM** off so that disk-based database access is checked first; loading to RAM is a separate setting, not a database-building step.
+For Stable V2.0, use **Mac database → Mac PictureFlow index → Mac artwork cache → clean eject → playback**. Do not use **Initialize Now** or **Update Now** on the iPod as part of this workflow: rebuilding there was extremely unstable on the tested device. In **Settings → General Settings → Database**, keep **Auto Update** set to **No**. For the initial database verification, leave **Load to RAM** off so that disk-based database access is checked first; loading to RAM is a separate setting, not a database-building step.
 
 1. Finish copying the music to `/Music`. Use consistent **Album** and **Album Artist** tags; the artwork script falls back to **Artist** when Album Artist is absent. Put a square `cover.jpg` in each album directory for the artwork generator.
 2. Mount the iPod in **Apple Disk Mode** on the Mac. Verify its actual mount point and that `.rockbox` exists. These commands assume `/Volumes/IPOD`.
