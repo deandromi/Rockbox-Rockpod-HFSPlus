@@ -1,6 +1,6 @@
 # HFS+ / Rockpod bugfix list
 
-Status: **V1.1 release: 47 findings fixed and built; remaining OPEN findings are not claimed fixed.**
+Status: **V1.1 release: 48 findings fixed and built; remaining OPEN findings are not claimed fixed.**
 Companion evidence log: `docs/hfsplus-audit.md` (HFS-001..HFS-133).
 Architecture/invariants: `agents.md`.
 Release/install gates: `shipping.md`.
