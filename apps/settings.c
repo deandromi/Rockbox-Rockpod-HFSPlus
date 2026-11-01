@@ -432,6 +432,10 @@ bool settings_load_config(const char* file, bool apply)
     if (apply)
     {
         settings_save();
+        /* Config/theme files are loaded by an explicit user action.  Force the
+         * storage-idle callback now so a reset or quick power-off cannot lose
+         * the freshly selected theme/settings. */
+        call_storage_idle_notifys(true);
         settings_apply(true);
         if (theme_changed)
             settings_apply_skins();
@@ -585,14 +589,16 @@ static bool settings_write_config(const char* filename, int options)
     int i;
     int fd;
     char value[MAX_PATH];
+    bool ok = true;
     fd = open(filename,O_CREAT|O_TRUNC|O_WRONLY, 0666);
     if (fd < 0)
         return false;
 
     if (options != SETTINGS_SAVE_RESUMEINFO)
     {
-        fdprintf(fd, "# .cfg file created by rockbox %s - "
-                 "http://www.rockbox.org\r\n\r\n", rbversion);
+        if (fdprintf(fd, "# .cfg file created by rockbox %s - "
+                     "http://www.rockbox.org\r\n\r\n", rbversion) < 0)
+            ok = false;
     }
 
     for(i=0; i<nb_settings; i++)
@@ -641,7 +647,8 @@ static bool settings_write_config(const char* filename, int options)
         cfg_to_string(setting, value, MAX_PATH);
         logf("Written: '%s: %s'\r\n",setting->cfg_name, value);
 
-        fdprintf(fd,"%s: %s\r\n",setting->cfg_name,value);
+        if (fdprintf(fd, "%s: %s\r\n", setting->cfg_name, value) < 0)
+            ok = false;
     } /* for(...) */
 #ifndef __PCTOOL__
     if (options == SETTINGS_SAVE_ALL)
@@ -650,8 +657,13 @@ static bool settings_write_config(const char* filename, int options)
         open_plugin_export(fd);
     }
 #endif
-    close(fd);
-    return true;
+    /* Make the .new config durable before the boot-time rename promotes it.
+     * A close/replace that failed silently was previously reported as success. */
+    if (fsync(fd) < 0)
+        ok = false;
+    if (close(fd) < 0)
+        ok = false;
+    return ok;
 }
 
 static void flush_global_status_callback(void)
