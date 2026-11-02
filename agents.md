@@ -1,11 +1,10 @@
 # agents.md — working contract for Rockbox-Rockpod-HFSPlus
 
-Status: reviewed 2026-11-02 for V3.0.
+Status: reviewed 2026-11-02 for V3.2.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public stable release identity: **V3.0 // Version V13.0**.
-Current build line: `docs/VERSION` is `3.2.0-beta4-v13.0` (V3.2 Beta 4).
-Current test build: **V3.2 Beta 4 — Thermo-Nuclear** (experimental, P0 hardware-unverified).
-Next stable release: **TBD**.
+Public stable release identity: **V3.2 // Version V13.0 — Thermo-Nuclear**.
+Current build line: `docs/VERSION` is `3.2.0-v13.0` (V3.2 stable).
+Previous stable: **V3.0 // Version V13.0**.
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
 
@@ -33,15 +32,16 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
   belong to each. Do not make users infer this from filenames.
 - Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
   final release unless the owner explicitly names a beta.
-- Current stable: **V3.0 // Version V13.0**.
-- Current owner-named experimental beta: **V3.2 Beta 4 — Thermo-Nuclear**.
+- Current stable: **V3.2 // Version V13.0 — Thermo-Nuclear**.
+- Previous stable: **V3.0 // Version V13.0**.
+- Last experimental beta: **V3.2 Beta 4 — Thermo-Nuclear** (historical).
 - The previously drafted V3.1 “Nuclear and Readable” stable name is deferred;
   V3.1 stable was not released.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. A local commit,
-  build or draft is not permission to publish. **V3.2 Beta 4 Thermo-Nuclear is
-  owner-approved for publication with the P0 hardware gates recorded as not
-  run.**
+  build or draft is not permission to publish. **V3.2 Thermo-Nuclear is
+  owner-approved for stable publication with the P0 stress gates recorded as
+  not run.**
 
 ---
 
@@ -255,7 +255,7 @@ Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware
 | Directory index | 16,384 parents; fallback scan |
 | CNID index | 4,096 entries; fallback scan |
 | Database workflow | Mac host build; on-device rebuild unsupported |
-| Hardware | V2.1.1 confirmed on one Classic 6G; V3.1 Beta 5 read-only USB validated on the same iFlash device |
+| Hardware | V3.2 stable confirmed on one Classic 6G with iFlash SD (boot, sleep/wake, overlay, plugins); V3.1 Beta 5 read-only USB validated on the same device |
 | USB transfer | HFS+ firmware USB mass storage is read-only; Apple Disk Mode for writes. The USB view relabels the data partition as Apple_HFS in RAM. |
 
 ---
@@ -484,6 +484,7 @@ Hard stops:
 | `docs/release-v3.2-beta2.md` | V3.2 Beta 2 release notes, freeze fix and hashes |
 | `docs/release-v3.2-beta3.md` | V3.2 Beta 3 release notes, sleep/wake rollback and hashes |
 | `docs/release-v3.2-beta4.md` | V3.2 Beta 4 release notes, extents-overflow support and hashes |
+| `docs/release-v3.2.md` | V3.2 Thermo-Nuclear stable release notes, user-visible changes and hashes |
 | `docs/v3.2-validation.md` | V3.2 host/build evidence and unexecuted device gates |
 | `docs/v3.2-review.md` | V3.2 thermo-nuclear code-quality review |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |

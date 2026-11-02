@@ -1,10 +1,11 @@
 # Next steps — V2.1.1 and later
 
-Status: V3.2 Beta 4 Thermo-Nuclear experimental build from the V3.0/V2.1.1
-baseline. The adapter is decomposed, the v3 overlay format and persistent index
-cache are implemented, and the read-only USB path is hardware-tested. This beta
-adds the P0/P1 efficiency portfolio; P0 hardware gates and device power/resume
-tests are not executed. See `release-v3.2-beta4.md` and `v3.2-validation.md`.
+Status: V3.2 Thermo-Nuclear stable build from the V3.0/V2.1.1 baseline. The
+adapter is decomposed, the v3 overlay format and persistent index cache are
+implemented, and the read-only USB path is hardware-tested. This release adds
+the P0/P1 efficiency portfolio plus read-only extents-overflow support; the
+formal P0 stress gates and the 100-cycle resume test are still not executed.
+See `release-v3.2.md` and `v3.2-validation.md`.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 
@@ -107,7 +108,7 @@ The disk/CPU audit is in [`efficiency.md`](efficiency.md). Implemented in V3.0:
 - A redundant entry sync after realloc was removed.
 - Debug reports cache HIT/MISS and ATA read/write/flush counters.
 
-Implemented in V3.2 Beta (host/build only; device gates pending):
+Implemented in V3.2:
 
 - Application multipliers: persistent filename lookup, album-art directory
   cache, tagcache fill without dircache, browser cursor, playback/viewer
@@ -124,17 +125,15 @@ Still open, in priority order:
 
 1. Redesign zero-spindown idle notifications without an early-boot periodic
    callback, then measure them.
-2. Validate the Beta 3 sleep/wake rollback and investigate the remaining
-   slow boot (20–30 s). Recheck directory loading, scroll-wheel ghosting and
-   Cover Flow on Beta 3.
-3. Physical P0 power-loss matrix, native-integrity check and 100-cycle
-   SSD/spindown resume test.
-4. Existing v2 containers do not get the v3 cache without a migration tool.
-5. ATA flush batching still needs a WAL/commit-group design and the hardware
+2. Formal P0 stress validation and the 100-cycle SSD/spindown resume test.
+   Sleep/wake and daily use are confirmed on one device; boot timing is parked
+   at the owner's request.
+3. Existing v2 containers do not get the v3 cache without a migration tool.
+4. ATA flush batching still needs a WAL/commit-group design and the hardware
    power-loss matrix.
-6. Full duplicate-name resolution is still O(U²); v1/v2 readdir keeps the
+5. Full duplicate-name resolution is still O(U²); v1/v2 readdir keeps the
    bounded linear fallback.
-7. Release-packaging and measurement items in `efficiency-paper.md` §7–§9.
+6. Release-packaging and measurement items in `efficiency-paper.md` §7–§9.
 
 Do not trade crash consistency for power without the hardware matrix.
 

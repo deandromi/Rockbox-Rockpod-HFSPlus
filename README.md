@@ -1,8 +1,8 @@
 # Rockpod HFS+
 
-**V3.0 // Version V13.0 and V2.0-Final**
+**V3.2 // Version V13.0 — Thermo-Nuclear**
 
-**Current test build: V3.2 Beta 4 — Thermo-Nuclear (experimental, not stable).**
+**Previous stable: V3.0 // Version V13.0. Legacy: V2.0-Final.**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
@@ -26,10 +26,12 @@ Please make a decision between picking either: the newer post V2 releases or the
 | Safe transfer mode | **Apple Disk Mode for writes; Rockbox USB mass storage is read-only** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
-| Release | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
-| Current beta | V3.2 Beta 4 — Thermo-Nuclear (experimental, P0 hardware-unverified) |
+| Release | [V3.2](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.2.0) |
+| Previous stable | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
 
-V3.0 decomposes the adapter, introduces the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3 and up requires a new v3 overlay if you haven't installed one already or currently have a V1/2 or V2-Final overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
+V3.2 builds on V3.0 without changing the v3 overlay: warm directory/CNID index cache, fewer overlay header flushes, faster database/album-art/path lookups, read-only stream read-ahead, and read-only extents-overflow support for large plugin data files. It also removes the V3.2 beta boot freeze and restores the known-good sleep/wake power path. See [`docs/release-v3.2.md`](docs/release-v3.2.md).
+
+V3.0 introduced the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixed overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3 and up requires a new v3 overlay if you haven't installed one already or currently have a V1/2 or V2-Final overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
 
 **Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2-final)
 is the final V2.1.1 package. It keeps an existing v1/v2 overlay and does not

@@ -3,9 +3,11 @@
 This is the hardware-side checklist for Rockpod HFS+ V2.1.1 and later. Host
 tests and ARM links do not prove storage, power-loss or bootloader behavior.
 
-**V3.2 Beta “Thermo-Nuclear”:** the current experimental batch is recorded in
-[`v3.2-validation.md`](v3.2-validation.md). Its P0 power-loss, native-integrity
-and SSD-resume gates are **not executed**; do not treat that beta as stable.
+**V3.2 Thermo-Nuclear:** the stable release evidence is recorded in
+[`v3.2-validation.md`](v3.2-validation.md). Boot, sleep/wake, overlay READY,
+plugin data files and daily use were confirmed on one iFlash SD unit. Its P0
+power-loss, native-integrity and 100-cycle SSD-resume gates are **not
+executed**; keep backups and treat the stress results as outstanding.
 
 ## Minimum before calling a build fully stable
 
