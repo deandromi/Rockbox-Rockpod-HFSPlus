@@ -1,6 +1,6 @@
 # HFS+ / Rockpod bugfix list
 
-Status: **V3.0 Beta: host/build verified; six documented format limits remain. Hardware validation for the v3 cache/format is pending.**
+Status: **V3.0: host/build verified and device boot confirmed; six documented format limits remain. Power-loss/power matrix remains tracked in issue #77.**
 Companion evidence log: `docs/hfsplus-audit.md` (HFS-001..HFS-133).
 Architecture/invariants: `agents.md`.
 Release/install gates: `shipping.md`.
@@ -34,9 +34,9 @@ The following findings were fixed in the V1.1 maintenance branch and are marked 
 
 Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
-## V3.0 Beta
+## V3.0
 
-V3.0 adds the v3 overlay format, persistent index cache and remaining fixes.
+V3.0 adds the required v3 overlay format, persistent index cache and remaining fixes. Existing v1/v2 overlays are backup/recovery only; they are not migrated.
 
 - `overlay_validate()` now returns a `struct hfs_overlay_validation`
   (reason + failing slot) from `hfsplus_overlay_validate.c`; the loader applies

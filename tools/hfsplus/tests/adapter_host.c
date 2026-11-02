@@ -430,7 +430,8 @@ static int test_diag(void)
            hfsplus_overlay_last_slot(), reason,
            hfsplus_overlay_reason_name(reason),
            (unsigned long)hfsplus_overlay_diag_id());
-    printf("index_cache=%d\n", hfsplus_index_cache_used(0));
+    printf("index_cache=%d overlay_version=%d\n",
+           hfsplus_index_cache_used(0), hfsplus_overlay_format_version(0));
     printf("io_reads=%u io_writes=%u io_flushes=%u\n",
            hfsplus_io_reads(0), hfsplus_io_writes(0), hfsplus_io_flushes(0));
     hfsplus_unmount(0);

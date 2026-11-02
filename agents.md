@@ -1,8 +1,8 @@
 # agents.md — working contract for Rockbox-Rockpod-HFSPlus
 
-Status: reviewed 2026-11-02 for V3.0 Beta 2.
+Status: reviewed 2026-11-02 for V3.0.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public release identity: **V3.0 Beta 2 // Version V13.0** (`docs/VERSION` is `3.0.0-beta2-v13.0`).
+Public release identity: **V3.0 // Version V13.0** (`docs/VERSION` is `3.0.0-v13.0`).
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
 
@@ -437,7 +437,7 @@ Hard stops:
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
 | `docs/efficiency.md` | Disk/CPU power audit and measurement checklist |
-| `docs/release-v3.0-beta2.md` | V3.0 Beta 2 release notes and hashes |
+| `docs/release-v3.0.md` | V3.0 release notes and hashes |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
 
 ### 11.1 Optional semantic index

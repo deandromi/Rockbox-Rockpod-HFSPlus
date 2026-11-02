@@ -1,6 +1,6 @@
 # Rockpod HFS+
 
-**V3.0 Beta 2 // Version V13.0**
+**V3.0 // Version V13.0**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
@@ -20,9 +20,9 @@ FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as o
 | Safe transfer mode | **Apple Disk Mode** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
-| Release | [V3.0 Beta 2](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0-beta2) |
+| Release | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
 
-V3.0 Beta 2 decomposes the adapter, adds the v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. Existing v1/v2 overlays remain readable; new containers initialize as v3. The Beta 2 update is firmware-only; the bootloader is unchanged. See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0-beta2.md`](docs/release-v3.0-beta2.md).
+V3.0 decomposes the adapter, introduces the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3.0 requires a new v3 overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
 
 ## Compatibility and limits
 
@@ -38,6 +38,14 @@ V3.0 Beta 2 decomposes the adapter, adds the v3 overlay format with a resumable 
 - `.rockbox` is a dot directory: use **Show Files → All** in Rockbox and `Cmd+Shift+.` in Finder.
 
 ## Installation
+
+> **V3.0 requires a v3 overlay. This is not optional.**
+>
+> A new installation must create a fresh `.rockpod-rw`; V3.0 initializes it
+> as v3. Existing v1/v2 overlays are **not migrated** and are not a supported
+> V3.0 configuration. Back one up only as recovery material, then replace it.
+> If you already created a v3 overlay during the V3.0 beta, you may keep it —
+> confirm **Debug → Disk Info → Overlay format: v3**.
 
 Download the release assets, or build them from source. Back up the iPod and `.rockpod-rw` first.
 
@@ -81,17 +89,33 @@ sudo diskutil eraseDisk JHFS+ IPOD APM /dev/diskN
 
 This creates a clean Apple Partition Map with one journaled HFS+ volume. It removes the Apple firmware partition and all data. The HFS+ bootloader is required to boot Rockpod afterwards. If your macOS version rejects `APM`, use `GPT` in the same command. If you need the Apple firmware/dual-boot layout, restore the iPod with Finder before starting over.
 
-### 2. Create the overlay only for a new install
+### 2. Create a new v3 overlay (mandatory)
+
+V3.0 does not migrate v1/v2 overlays. Back up the old container, move it out of
+the iPod, and create a new one. Settings, playlists, tagcache data and generated
+artwork stored only in the old overlay are not imported; this is the cost of the
+v3 format until a migration tool exists.
 
 ```sh
+backup="$HOME/rockpod-overlay-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$backup"
+
 if [ -e "/Volumes/IPOD/.rockpod-rw" ]; then
-    echo "Existing overlay retained."
-else
-    mkfile 1g "/Volumes/IPOD/.rockpod-rw"
+    ditto "/Volumes/IPOD/.rockpod-rw" "$backup/.rockpod-rw"
+    mv "/Volumes/IPOD/.rockpod-rw" "$backup/.rockpod-rw.removed"
 fi
+
+mkfile 1g "/Volumes/IPOD/.rockpod-rw"
+sync
 ```
 
-`mkfile` must finish successfully. Do not use a sparse file.
+`mkfile` must finish successfully and must not create a sparse file. Do not
+leave an old v2 container in place: the debug screen will show
+`Overlay format: v2 (V3.0 requires new overlay)` and V3.0 will not use the v3
+index cache or high-water entry reads.
+
+If the debug screen already reports `Overlay format: v3`, the container is
+already compliant and does not need to be recreated.
 
 ### 3. Stop Apple device helpers and install the bootloader
 
@@ -103,10 +127,10 @@ First verify the image:
 shasum -a 256 bootloader-ipod6g.ipod
 ```
 
-Expected V3.0 Beta 2 bootloader hash:
+Expected V3.0 bootloader hash:
 
 ```text
-e398b95d087dfb676fbc6dbc21c46445bbe47e6ef6ba84d8b6ef80e0f3ec4359
+78cf341f97a0ec828a8627926bd348f67275f19b9d603682c32cdaf80891dc7e
 ```
 
 Eject the volume before DFU. Keep the USB cable connected.
@@ -407,7 +431,7 @@ make -C tools/hfsplus sanitize
 python3 tools/hfsplus/tests/check_integration.py
 ```
 
-V3.0 Beta 2 passes 20 reader tests, 7 partition tests and 30 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.0-beta2.md`](docs/release-v3.0-beta2.md).
+V3.0 passes 20 reader tests, 7 partition tests and 30 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.0.md`](docs/release-v3.0.md).
 
 ## License and credits
 

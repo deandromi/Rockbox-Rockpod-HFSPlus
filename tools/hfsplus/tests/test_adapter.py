@@ -338,6 +338,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(diag["ready"], "1")
         self.assertEqual(diag["stage"], "9")
         self.assertEqual(diag["index_cache"], "0")
+        self.assertEqual(diag["overlay_version"], "2")
 
     def test_v3_index_cache_and_high_water(self):
         out = self.run_harness(self.image, "rw")
@@ -357,6 +358,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(diag["ready"], "1")
         self.assertEqual(diag["stage"], "9")
         self.assertEqual(diag["index_cache"], "1")
+        self.assertEqual(diag["overlay_version"], "3")
 
     def test_stage11_unallocated_range_reports_slot_and_reason(self):
         b, base, bitmap, _, files = self.two_file_overlay()

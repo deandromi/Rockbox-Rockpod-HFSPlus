@@ -50,6 +50,11 @@ int hfsplus_index_cache_used(int volume)
     return hfs_state_get(volume)->diag.index_cache;
 }
 
+int hfsplus_overlay_format_version(int volume)
+{
+    return (int)hfs_state_get(volume)->overlay.version;
+}
+
 unsigned int hfsplus_io_reads(int volume)
 {
     return hfs_state_get(volume)->io.reads;

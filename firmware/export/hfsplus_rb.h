@@ -47,6 +47,7 @@ int hfsplus_overlay_last_stage(void);
 int hfsplus_overlay_last_slot(void);
 int hfsplus_overlay_last_reason(void);
 int hfsplus_index_cache_used(int volume);
+int hfsplus_overlay_format_version(int volume);
 unsigned int hfsplus_io_reads(int volume);
 unsigned int hfsplus_io_writes(int volume);
 unsigned int hfsplus_io_flushes(int volume);

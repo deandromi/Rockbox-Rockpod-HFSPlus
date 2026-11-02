@@ -1490,6 +1490,9 @@ static int disk_callback(int btn, struct gui_synclist *lists)
     int ovl_slot = hfsplus_overlay_last_slot_vol(0);
     int ovl_reason = hfsplus_overlay_last_reason_vol(0);
     simplelist_addline("HFS+ overlay: %s", hfsplus_overlay_ready(0) ? "READY" : "OFF");
+    int ovl_fmt = hfsplus_overlay_format_version(0);
+    simplelist_addline("Overlay format: v%d%s", ovl_fmt,
+                       ovl_fmt < 3 ? " (V3.0 requires new overlay)" : "");
     simplelist_addline("Overlay stage: %d", ovl_stage);
     simplelist_addline("Overlay error: %d", hfsplus_overlay_last_error_vol(0));
     simplelist_addline("Overlay slot: %d", ovl_slot);
