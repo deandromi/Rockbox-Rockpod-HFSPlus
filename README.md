@@ -21,7 +21,7 @@ Please make a decision between picking either: the newer post V2 releases or the
 | Target | iPod Classic 6G / `ipod6g` (target ID 71) |
 | Filesystem | HFS+ version 4; APFS and HFSX are not supported |
 | Boot | Separate HFS+-aware bootloader in NOR flash |
-| Safe transfer mode | **Apple Disk Mode** |
+| Safe transfer mode | **Apple Disk Mode; Rockbox-USB Mass Storage mode causes corruption, not a Rockpod-HFS+ related issue** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
 | Release | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
