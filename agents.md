@@ -3,8 +3,8 @@
 Status: reviewed 2026-11-02 for V3.0.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Public stable release identity: **V3.0 // Version V13.0**.
-Current build line: `docs/VERSION` is `3.2.0-beta2-v13.0` (V3.2 Beta 2).
-Current test build: **V3.2 Beta 2 — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
+Current build line: `docs/VERSION` is `3.2.0-beta3-v13.0` (V3.2 Beta 3).
+Current test build: **V3.2 Beta 3 — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
 Next stable release: **TBD**.
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
@@ -34,12 +34,12 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 - Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
   final release unless the owner explicitly names a beta.
 - Current stable: **V3.0 // Version V13.0**.
-- Current owner-named experimental beta: **V3.2 Beta 2 — “Thermo-Nuclear”**.
+- Current owner-named experimental beta: **V3.2 Beta 3 — “Thermo-Nuclear”**.
 - The previously drafted V3.1 “Nuclear and Readable” stable name is deferred;
   V3.1 stable was not released.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. A local commit,
-  build or draft is not permission to publish. **V3.2 Beta 2 “Thermo-Nuclear” is
+  build or draft is not permission to publish. **V3.2 Beta 3 “Thermo-Nuclear” is
   owner-approved for publication with the P0 hardware gates recorded as not
   run.**
 
@@ -483,6 +483,7 @@ Hard stops:
 | `docs/release-v3.1.md` | Draft V3.1 “Nuclear and Readable” release note (not released) |
 | `docs/release-v3.2-beta.md` | V3.2 Beta 1 release notes, warnings and hashes |
 | `docs/release-v3.2-beta2.md` | V3.2 Beta 2 release notes, freeze fix and hashes |
+| `docs/release-v3.2-beta3.md` | V3.2 Beta 3 release notes, sleep/wake rollback and hashes |
 | `docs/v3.2-validation.md` | V3.2 host/build evidence and unexecuted device gates |
 | `docs/v3.2-review.md` | V3.2 thermo-nuclear code-quality review |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |

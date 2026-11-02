@@ -529,11 +529,24 @@ read_tagfile_entry_and_tag(int fd, struct tagfile_entry *tfe,
 
 static ssize_t read_index_entries(int fd, struct index_entry *buf, size_t count)
 {
-    ssize_t ret = read(fd, buf, sizeof(*buf) * count);
-    for (ssize_t i = 0; i < ret; i += sizeof(*buf))
-        swap_index_entry(buf++);
+    /* A single read() may return short on a slow/interrupted backing store.
+     * The batched RAM-index load must not fail just because one sector
+     * boundary split the transfer; fill the whole request before swapping. */
+    size_t total = sizeof(*buf) * count;
+    size_t done = 0;
 
-    return ret;
+    while (done < total)
+    {
+        ssize_t ret = read(fd, (uint8_t *)buf + done, total - done);
+        if (ret <= 0)
+            break;
+        done += (size_t)ret;
+    }
+
+    for (size_t i = 0; i < done; i += sizeof(*buf))
+        swap_index_entry((struct index_entry *)((uint8_t *)buf + i));
+
+    return (ssize_t)done;
 }
 
 static ssize_t write_index_entries(int fd, struct index_entry *buf, size_t count)
