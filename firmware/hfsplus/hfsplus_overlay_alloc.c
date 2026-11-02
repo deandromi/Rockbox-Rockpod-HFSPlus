@@ -13,6 +13,19 @@ static int overlay_range_owned(const struct hfs_overlay *o,
                                uint32_t start, uint32_t blocks,
                                const struct hfs_overlay_entry *except);
 
+/* A 16 KiB copy buffer reduces a large realloc or materialization from one
+ * 4 KiB ATA transaction per block to one per four blocks.  Firmware uses the
+ * dedicated aligned buffer; the bootloader never reaches this code and keeps
+ * s->scratch as the fallback so the state layout stays small. */
+static uint8_t *overlay_copy_buffer(struct hfs_state *s)
+{
+#ifdef BOOTLOADER
+    return s->scratch;
+#else
+    return s->copy_buffer;
+#endif
+}
+
 void overlay_set_bit(struct hfs_overlay *o, uint32_t block, int used)
 {
     uint8_t mask = (uint8_t)(1u << (block & 7u));
@@ -192,17 +205,18 @@ static int overlay_realloc(struct hfs_state *s, struct hfs_overlay_entry *e,
     int rc = overlay_alloc_run(s, needed, &newstart);
     if (rc)
         return rc;
+    uint8_t *copy = overlay_copy_buffer(s);
     uint64_t copied = 0;
     while (copied < e->size) {
-        size_t chunk = HFS_OVL_BLOCK;
+        size_t chunk = HFS_IO_BOUNCE_SIZE;
         if (e->size - copied < chunk)
             chunk = (size_t)(e->size - copied);
         rc = overlay_container_read(s,
-            (uint64_t)oldstart * HFS_OVL_BLOCK + copied, s->scratch, chunk);
+            (uint64_t)oldstart * HFS_OVL_BLOCK + copied, copy, chunk);
         if (rc)
             break;
         rc = overlay_container_write(s,
-            (uint64_t)newstart * HFS_OVL_BLOCK + copied, s->scratch, chunk);
+            (uint64_t)newstart * HFS_OVL_BLOCK + copied, copy, chunk);
         if (rc)
             break;
         copied += chunk;
@@ -285,18 +299,19 @@ int overlay_materialize_base(struct hfs_state *s,
         memset(&src, 0, sizeof(src));
         src.kind = 2;
         src.data = *fork;
+        uint8_t *copy = overlay_copy_buffer(s);
         uint64_t copied = 0;
         while (copied < e->size) {
-            size_t chunk = HFS_OVL_BLOCK, done = 0;
+            size_t chunk = HFS_IO_BOUNCE_SIZE, done = 0;
             if (e->size - copied < chunk)
                 chunk = (size_t)(e->size - copied);
-            rc = hfs_ro_pread(&s->volume, &src, copied, s->scratch, chunk, &done);
+            rc = hfs_ro_pread(&s->volume, &src, copied, copy, chunk, &done);
             if (rc || done != chunk) {
                 overlay_free_run(s, NULL, start, capacity, 0);
                 return rc ? rc : HFS_RO_IO;
             }
             rc = overlay_container_write(s,
-                (uint64_t)start * HFS_OVL_BLOCK + copied, s->scratch, chunk);
+                (uint64_t)start * HFS_OVL_BLOCK + copied, copy, chunk);
             if (rc) {
                 overlay_free_run(s, NULL, start, capacity, 0);
                 return rc;

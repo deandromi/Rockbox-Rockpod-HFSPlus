@@ -54,10 +54,17 @@ enum filestr_cache_flags
 
 struct filestr_cache
 {
-    sector_t      sector;   /* file sector that is in buffer */
-    uint8_t       *buffer;  /* buffer to hold sector */
+    sector_t      sector;   /* first file sector that is in buffer */
+    uint8_t       *buffer;  /* buffer to hold sector(s) */
     unsigned int  flags;    /* FSC_* bits */
+    uint16_t      nsectors; /* valid sectors at 'sector'; 0 = invalid */
 };
+
+/* A cache normally holds exactly one sector. A read-only stream with no
+ * writers may instead hold a read-ahead window of consecutive sectors, up to
+ * DC_CACHE_BUFSIZE bytes. 'nsectors' describes that valid range; it must be
+ * zero whenever 'sector' is INVALID_SECNUM. A dirty cache is always exactly
+ * one sector, which keeps the existing writable-stream coherence rules. */
 
 void file_cache_init(struct filestr_cache *cachep);
 void file_cache_reset(struct filestr_cache *cachep);

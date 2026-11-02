@@ -40,8 +40,9 @@ static void overlay_id_insert(struct hfs_overlay *o, unsigned int index)
 
 static void overlay_id_rebuild(struct hfs_overlay *o)
 {
+    const unsigned int limit = overlay_entry_limit(o);
     memset(o->id_hash, 0xff, sizeof(o->id_hash));
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i)
+    for (unsigned int i = 0; i < limit; ++i)
         if (o->entries[i].flags & HFS_OVL_USED)
             overlay_id_insert(o, i);
 }
@@ -91,15 +92,19 @@ static void overlay_parent_remove(struct hfs_overlay *o, unsigned int index,
     }
     /* A cycle in the RAM chain must not hang a filesystem operation. */
     o->parent_head[b] = HFS_OVL_NONE;
+    o->parent_index_ok = 0;
 }
 
 void overlay_rebuild_indexes(struct hfs_overlay *o)
 {
+    const unsigned int limit = overlay_entry_limit(o);
     memset(o->id_hash, 0xff, sizeof(o->id_hash));
     o->id_tombstones = 0;
     memset(o->parent_head, 0xff, sizeof(o->parent_head));
     memset(o->parent_next, 0xff, sizeof(o->parent_next));
-    o->free_slot_hint = HFS_OVL_NONE;
+    o->parent_index_ok = 0;
+    o->free_slot_hint = limit < HFS_OVL_MAX_ENTRIES ?
+                        (uint16_t)limit : HFS_OVL_NONE;
     o->free_blocks = 0;
     o->alloc_hint = o->data_start;
     bool have_hint = false;
@@ -113,9 +118,10 @@ void overlay_rebuild_indexes(struct hfs_overlay *o)
             }
         }
     }
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+    for (unsigned int i = 0; i < limit; ++i) {
         if (!(o->entries[i].flags & HFS_OVL_USED)) {
-            if (o->free_slot_hint == HFS_OVL_NONE)
+            if (o->free_slot_hint == HFS_OVL_NONE ||
+                i < o->free_slot_hint)
                 o->free_slot_hint = (uint16_t)i;
             continue;
         }
@@ -128,6 +134,10 @@ void overlay_rebuild_indexes(struct hfs_overlay *o)
     }
     if (o->next_id <= max_id)
         o->next_id = max_id == 0x7fffffffu ? HFS_OVL_ID_BASE : max_id + 1u;
+    /* Only v3 persists a high-water bound, so only v3 is known to have a
+     * complete parent chain for every slot that can exist.  v1/v2 keep the
+     * linear readdir fallback. */
+    o->parent_index_ok = o->version == HFS_OVL_VERSION_3;
 }
 
 static int overlay_find_free_slot(struct hfs_overlay *o)
@@ -239,9 +249,15 @@ int overlay_create_entry(struct hfs_state *s, uint32_t parent,
     if (s->overlay.version == HFS_OVL_VERSION_3 &&
         (uint32_t)slot >= s->overlay.entry_high_water) {
         uint32_t old_high = s->overlay.entry_high_water;
-        s->overlay.entry_high_water = (uint32_t)slot + 1u;
+        uint32_t new_high = old_high + HFS_OVL_HIGH_WATER_CHUNK;
+        if (new_high < (uint32_t)slot + 1u)
+            new_high = (uint32_t)slot + 1u;
+        if (new_high > HFS_OVL_MAX_ENTRIES)
+            new_high = HFS_OVL_MAX_ENTRIES;
+        s->overlay.entry_high_water = new_high;
         /* The loader must see the new high-water bound before the entry it
-         * bounds becomes visible. */
+         * bounds becomes visible.  Reserving a chunk amortizes this header
+         * flush across the next HFS_OVL_HIGH_WATER_CHUNK creates. */
         int hrc = overlay_sync_header(s);
         if (hrc) {
             s->overlay.entry_high_water = old_high;

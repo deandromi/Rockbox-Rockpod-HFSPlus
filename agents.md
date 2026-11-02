@@ -2,7 +2,10 @@
 
 Status: reviewed 2026-11-02 for V3.0.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public release identity: **V3.0 // Version V13.0** (`docs/VERSION` is `3.0.0-v13.0`).
+Public stable release identity: **V3.0 // Version V13.0**.
+Current build line: `docs/VERSION` is `3.2.0-beta-v13.0` (V3.2 Beta).
+Current test build: **V3.2 Beta — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
+Next stable release: **TBD**.
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
 
@@ -20,6 +23,22 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 8. **Keep the adapter decomposed.** The old `firmware/hfsplus/hfsplus_rb.c` monolith has been split by responsibility (I/O, format, allocation, store, namespace, FAT, mount, diagnostics). Put new behavior in the owning module; do not recreate a shared mega-file. See §8 and `docs/efficiency.md`.
 9. **Do not claim hardware verification without a recorded device run.** Host tests and ARM links are not device tests.
 10. **Ask before destructive device operations.** Backups, disk-mode state and recovery paths must be verified first.
+
+### Release naming and approval
+
+- Official non-beta releases use a semantic version line plus a human codename
+  in the public release title and notes.
+- Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
+  final release unless the owner explicitly names a beta.
+- Current stable: **V3.0 // Version V13.0**.
+- Current owner-named experimental beta: **V3.2 Beta — “Thermo-Nuclear”**.
+- The previously drafted V3.1 “Nuclear and Readable” stable name is deferred;
+  V3.1 stable was not released.
+- Do not tag or publish a release until the owner has reviewed the package,
+  except for a beta the owner explicitly names and approves. A local commit,
+  build or draft is not permission to publish. **V3.2 Beta “Thermo-Nuclear” is
+  owner-approved for publication with the P0 hardware gates recorded as not
+  run.**
 
 ---
 
@@ -259,7 +278,8 @@ Current expected result:
 - macOS host integration mode passes.
 - Firmware, Thumb bootloader, database host tool, `mks5lboot`, DFU and `rockbox.zip` build.
 
-Release hashes are in `docs/release-v3.0-beta.md`. Do not reuse historical hashes from this file.
+Release hashes are in `docs/release-v3.1-beta5.md` for the published beta line and
+`docs/release-v3.1.md` for the draft V3.1 release. Do not reuse historical hashes from this file.
 
 Build commands:
 
@@ -296,6 +316,11 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
   10 data-size, 11 data-unallocated, 12 data-overlap, 13 parent, 14 next-id.
 - `-4`: native HFS+ dirty/inconsistent/journal replay required.
 - `diskutil verifyVolume` checks native HFS+ only, not overlay internals.
+- With the default `disk_spindown = 0`, the ATA event still asserts storage
+  active (no automatic standby), but `Q_STORAGE_IDLE_NOTIFY` now runs the
+  deferred storage-idle callbacks at their normal 30 s cadence. The old
+  "callbacks only run at forced points" timing issue is addressed; the power
+  cost of the periodic notify is not measured on hardware.
 - Rockbox USB mass storage is read-only on HFS+ firmware builds. Host writes
   return SCSI DATA PROTECT; use Apple Disk Mode for changes. The read-only LUN
   is safe for copying files off and reading `/.rockpod-rw` for diagnostics.
@@ -449,7 +474,12 @@ Hard stops:
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
 | `docs/efficiency.md` | Disk/CPU power audit and measurement checklist |
+| `docs/efficiency-paper.md` | Repository-wide efficiency paper (custom HFS+, inherited Rockbox, build/tooling, non-code) |
 | `docs/release-v3.0.md` | V3.0 release notes and hashes |
+| `docs/release-v3.1.md` | Draft V3.1 “Nuclear and Readable” release note (not released) |
+| `docs/release-v3.2-beta.md` | V3.2 Beta release notes, warnings and hashes |
+| `docs/v3.2-validation.md` | V3.2 host/build evidence and unexecuted device gates |
+| `docs/v3.2-review.md` | V3.2 thermo-nuclear code-quality review |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
 
 ### 11.1 Optional semantic index

@@ -122,6 +122,29 @@ def v3_to_v2_header(b, base):
     b[base + 4096:base + 8192] = hdr
 
 
+def set_v3_high_water(b, base, high_water):
+    """Patch both v3 headers and keep their checksums valid."""
+    hdr = bytearray(b[base:base + 4096])
+    struct.pack_into("<I", hdr, 44, high_water)
+    struct.pack_into("<I", hdr, 40, 0)
+    struct.pack_into("<I", hdr, 40, overlay_checksum_v3(hdr))
+    b[base:base + 4096] = hdr
+    b[base + 4096:base + 8192] = hdr
+
+
+def write_entry_raw(b, base, entry_start, slot, ident, parent, flags, name,
+                    kind=1, data_start=0, data_blocks=0, size=0):
+    raw = bytearray(320)
+    struct.pack_into("<4I", raw, 0, ident, parent, flags, 0)
+    struct.pack_into("<Q", raw, 16, size)
+    struct.pack_into("<2I", raw, 24, data_start, data_blocks)
+    struct.pack_into("<I", raw, 32, 0)
+    struct.pack_into("<2H", raw, 36, kind, len(name))
+    raw[40:40 + len(name)] = name
+    off = base + entry_start + slot * 320
+    b[off:off + 320] = raw
+
+
 class AdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -244,11 +267,11 @@ class AdapterTests(unittest.TestCase):
                          victim["id"])
         self.run_harness(bytes(b), "readonly")
 
-    def run_diag(self, image):
+    def run_diag(self, image, test="diag"):
         src = self.path("diag-in.hfs")
         dst = self.path("diag-out.hfs")
         src.write_bytes(image)
-        p = subprocess.run([HARNESS, str(src), str(dst), "diag"],
+        p = subprocess.run([HARNESS, str(src), str(dst), test],
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(p.returncode, 0, p.stderr)
         fields = {}
@@ -360,6 +383,69 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(diag["index_cache"], "1")
         self.assertEqual(diag["overlay_version"], "3")
 
+    def test_v3_high_water_bounds_validator_and_index(self):
+        out = self.run_harness(self.image, "twofiles")
+        b = bytearray(out)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        es, bitmap, entry_start, data_start = entries(b, base)
+        live_high = max(e["slot"] for e in es) + 1
+        total_blocks = struct.unpack_from("<I", b, base + 20)[0]
+        block = total_blocks - 1
+        while block > data_start and (
+                b[base + bitmap + (block >> 3)] & (1 << (block & 7))):
+            block -= 1
+        self.assertGreater(block, data_start)
+
+        # Slot 500 is beyond every live entry.  It passes the wire decoder but
+        # points at an unallocated block, so only the bounded validator decides
+        # whether it exists.
+        slot = 500
+        write_entry_raw(b, base, entry_start, slot, ID_BASE + 0x1234,
+                        2, FLAG_USED, b"x", kind=1, data_start=block,
+                        data_blocks=1, size=0)
+        set_v3_high_water(b, base, live_high)
+        diag = self.run_diag(bytes(b))
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "1")
+        self.assertEqual(diag["stage"], "9")
+        self.assertEqual(diag["high_water"], str(live_high))
+        # Index rebuild must also stop at the same bound: "x" must never be
+        # inserted into the parent chain.
+        self.run_harness(bytes(b), "readdir")
+
+        # Raising the bound exposes the corrupt slot to the validator.
+        set_v3_high_water(b, base, slot + 1)
+        self.assert_stage11(self.run_diag(bytes(b)), slot,
+                            "data-unallocated")
+
+    def test_readdir_bucket_walk_and_v2_linear_fallback(self):
+        out = self.run_harness(self.image, "twofiles")
+        self.run_harness(out, "readdir")
+        v2 = bytearray(out)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        v3_to_v2_header(v2, base)
+        self.run_harness(bytes(v2), "readdir")
+
+    def test_readdir_bucket_many_children(self):
+        self.run_harness(self.image, "readdir-buckets")
+
+    def test_adapter_name_lookup_cache_invalidation(self):
+        """The HFS+ lookup hook must see create/rename/remove immediately."""
+        self.run_harness(self.image, "find")
+
+    def test_realloc_copy_keeps_prefix(self):
+        self.run_harness(self.image, "grow-copy")
+
+    def test_per_operation_counters(self):
+        diag = self.run_diag(self.image, "ops")
+        self.assertEqual(diag["op_create"], "1")
+        self.assertEqual(diag["op_write"], "1")
+        self.assertEqual(diag["op_close"], "1")
+        self.assertEqual(diag["op_rename"], "1")
+        self.assertEqual(diag["op_remove"], "1")
+        self.assertGreaterEqual(int(diag["op_settings"]), 4)
+        self.assertGreater(int(diag["flush_settings"]), 0)
+
     def test_stage11_unallocated_range_reports_slot_and_reason(self):
         b, base, bitmap, _, files = self.two_file_overlay()
         victim = files[0]
@@ -437,6 +523,32 @@ class AdapterTests(unittest.TestCase):
         out = self.run_harness(self.image, "recovery")
         faulted = self.run_harness(out, "fault", fail_after=2)
         self.run_harness(faulted, "verify")
+
+    def test_power_loss_fault_matrix_smoke(self):
+        """Host approximation of the P0 power-loss matrix.
+
+        A failed write must leave a mountable old-or-new state, or fail closed
+        with a specific validation stage. It must never panic or produce a
+        live entry with an invalid range.
+        """
+        base = self.run_harness(self.image, "recovery")
+        for fail_after in range(1, 7):
+            faulted = self.run_harness(base, "fault", fail_after=fail_after)
+            diag = self.run_diag(faulted)
+            self.assertEqual(diag["mount"], "0")
+            if diag["ready"] == "1":
+                self.assertEqual(diag["stage"], "9")
+            else:
+                self.assertIn(diag["stage"], ("3", "7", "8", "11"))
+                self.assertEqual(diag["error"], "-2")
+
+    def test_overlay_writes_do_not_touch_native_region(self):
+        """P0 host check: only the overlay container may change."""
+        out = bytearray(self.run_harness(self.image, "rw"))
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        end = base + fixtures.CONTAINER_BLOCKS * fixtures.BLOCK
+        self.assertEqual(bytes(out[:base]), bytes(self.image[:base]))
+        self.assertEqual(bytes(out[end:]), bytes(self.image[end:]))
 
 
 if __name__ == "__main__":

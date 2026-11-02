@@ -132,6 +132,7 @@ int run_rb_test(const uint8_t *image, size_t length, uint32_t sector)
     CHECK(!writes && !out_of_bounds);
     hfsplus_unmount(0);
     CHECK(!hfsplus_mounted(0));
+    CHECK(!hfsplus_overlay_ready(0));
 
     /* USB mode unmounts the volume before exporting the raw disk; the MBR
      * relabel must still work from the cached partition geometry. */
@@ -139,5 +140,11 @@ int run_rb_test(const uint8_t *image, size_t length, uint32_t sector)
     entry[8] = mbr_start & 0xff;
     hfsplus_usb_fix_mbr(mbr, unit);
     CHECK(entry[4] == 0xaf);
+
+    /* A second mount/unmount cycle must not retain any overlay state. */
+    CHECK(hfsplus_mount(0, 0, parts[chosen].start, parts[chosen].size) == 0);
+    CHECK(hfsplus_mounted(0));
+    hfsplus_unmount(0);
+    CHECK(!hfsplus_mounted(0));
     return 0;
 }

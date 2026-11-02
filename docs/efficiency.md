@@ -192,3 +192,6 @@ Before claiming a power improvement on hardware, record:
 Host tests cannot prove power. They can prove that the adapter no longer
 revalidates the immutable container and that the failure cases still fail
 closed.
+
+For the repository-wide paper covering inherited Rockbox, build/tooling and
+non-code upgrades, see [`efficiency-paper.md`](efficiency-paper.md).

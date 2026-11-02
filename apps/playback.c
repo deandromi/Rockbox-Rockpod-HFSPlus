@@ -875,6 +875,8 @@ size_t audio_buffer_available(void)
 #ifdef HAVE_ALBUMART
 static void clear_last_folder_album_art(void)
 {
+    albumart_cache_clear();
+
     if(last_folder_aa_path[0] == 0)
         return;
 
@@ -1618,8 +1620,8 @@ static bool audio_get_track_metadata(int offset, struct mp3entry *id3)
     char path[MAX_PATH+1];
     if (playlist_peek(offset, path, sizeof (path)))
     {
-#if defined(HAVE_TC_RAMCACHE) && defined(HAVE_DIRCACHE)
-        /* Try to get it from the database */
+#if defined(HAVE_TAGCACHE) && defined(HAVE_TC_RAMCACHE)
+        /* Try to get it from the database (RAM cache or filename index) */
         if (!tagcache_fill_tags(id3, path))
 #endif
         {
@@ -2145,13 +2147,13 @@ static int audio_load_track(void)
         if (!path)
             break;
 
-        /* Test for broken playlists by probing for the files */
-        if (file_exists(path))
-        {
-            fd = open(path, O_RDONLY);
-            if (fd >= 0)
-                break;
-        }
+        /* playlist_peek() has already sanitised external playlists and
+         * internal entries are built from absolute paths.  open() is the
+         * authoritative check here; the extra file_exists() walk only
+         * repeated the same path resolution. */
+        fd = open(path, O_RDONLY);
+        if (fd >= 0)
+            break;
         logf("Open failed %s", path);
 
         /* only skip if failed track has a successor in playlist */
@@ -3588,6 +3590,12 @@ void audio_playback_handler(struct queue_event *ev)
         case SYS_USB_CONNECTED:
         case Q_AUDIO_STOP:
             LOGFQUEUE("playback < Q_AUDIO_STOP");
+#ifdef HAVE_ALBUMART
+            /* USB may modify external art even when playback is already
+             * stopped, where audio_stop_playback() returns early. */
+            if (ev->id == SYS_USB_CONNECTED)
+                clear_last_folder_album_art();
+#endif
             audio_stop_playback();
             if (ev->data != 0)
                 queue_clear(&audio_queue);

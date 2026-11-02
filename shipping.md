@@ -1,8 +1,9 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Release identity: **Rockpod HFS+ — V3.0 // Version V13.0**.
-Internal version file: `docs/VERSION` = `3.0.0-v13.0`.
+Stable release identity: **Rockpod HFS+ — V3.0 // Version V13.0**.
+Current owner-named experimental beta: **V3.2 Beta — “Thermo-Nuclear”** (P0 hardware-unverified).
+Current build line: `docs/VERSION` = `3.2.0-beta-v13.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
 Companion document: `agents.md` (architecture, invariants, code-quality review).
@@ -50,7 +51,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 | **Theme persistence (HFS-133)** | **FIXED in code V1.1 (device test pending)**: fsync + forced storage-idle commit; config.new promotion reproduced on host. |
 | **Mount unwind (HFS-010)** | **FIXED in V1.1 (host)**: failed mounts unmount and the next mount is retried. |
 | Adapter write-path default test | Not run by `make test`; `test_native_adapter` skips unless `HFS_RB_TESTS` is supplied. The temporary harness is not committed. |
-| `check_integration.py` on macOS | Fails with clang/Mach-O/freestanding errors; Linux/GCC-oriented. |
+| `check_integration.py` on macOS | **PASS**: macOS host adapter (real HFS+ modules/ro/partition) passes; no ARM link, emulator or iPod boot is tested by this script. |
 | Firmware on hardware | **V2.1.1 confirmed on the test iPod**: overlay READY, startup, theme selection and playback work. |
 | Bootloader DFU install | Not run in this session. |
 | Full music database / Cover Flow pipeline on hardware | User-confirmed working on the test device; the full multi-device matrix remains pending. |
@@ -84,8 +85,16 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 ### 1.3 Naming
 
-- Public name: **V3.0 // Version V13.0**.
-- `docs/VERSION`: `3.0.0-v13.0`.
+- Stable public name: **V3.0 // Version V13.0**.
+- Current owner-named experimental beta: **V3.2 Beta — “Thermo-Nuclear”**.
+- Official non-beta releases always carry a codename in the release title and
+  notes. Beta/pre-release builds keep `Vx.y Beta N`; the final codename is not
+  used for a beta unless the owner explicitly names it.
+- `docs/VERSION` on the current beta line: `3.2.0-beta-v13.0`.
+- Do not tag or publish a release until the owner has reviewed the package,
+  except for a beta the owner explicitly names and approves. **V3.2 Beta
+  “Thermo-Nuclear” is owner-approved for publication with the P0 hardware
+  gates recorded as not run.**
 - Built firmware version appends the UTC build date, e.g. `1.0-v12.0-261101`.
 - Internal overlay magic/version: `RPOVL11`/`RPOVL12`/`RPOVL13`, format versions 1/2/3. This is **not** the public release number. New containers initialize as v3.
 - The bootloader diagnostic text `HFS+ v8 ...` is an old label, not a release or bootloader version.
@@ -972,7 +981,7 @@ Do not mark a row “pass” from a different build or a different device.
 - [x] No open S0 findings in `docs/hfsplus-audit.md` (V1.1 fixed HFS-001/002/003/004/112/114).
 - [ ] ARM toolchain verified (`arm-elf-eabi-gcc` 9.5.0, binutils 2.38).
 - [ ] Firmware built; `rockbox.ipod` and `rockbox.zip` present.
-- [ ] Bootloader built with `--thumb`; size within `MOVE_AREA`.
+- [ ] Bootloader built with `--thumb`; confirm it is not the silent ARM fallback; record `_moveend` and `MOVE_AREA` headroom.
 - [ ] `mks5lboot` built and `--mkdfu-inst` dry-run passed.
 - [ ] Database tool built as native Mach-O and smoke-tested with a temporary iPod root.
 - [ ] Host reader tests and ASan/UBSan passed.
@@ -982,8 +991,10 @@ Do not mark a row “pass” from a different build or a different device.
 
 - [ ] `SHA256SUMS` generated.
 - [ ] Zip contains `.rockbox/rockbox.ipod`, codecs, plugins, themes, fonts, language files.
+- [ ] Embedded `.rockbox/rockbox.ipod` SHA-256 matches the release `rockbox.ipod`.
 - [ ] Bootloader is scrambled and accepted by `mks5lboot`.
-- [ ] Release notes state the exact firmware version, bootloader requirement and overlay format compatibility.
+- [ ] Release notes state the exact firmware version, codename, bootloader requirement and overlay format compatibility.
+- [ ] Owner approval recorded before tagging or publishing.
 
 ### 17.4 Device
 

@@ -90,6 +90,9 @@ static int overlay_flush(struct hfs_state *s)
 {
 #ifdef HAVE_STORAGE_FLUSH
     ++s->diag.flush_ops;
+    if (s->diag.op_active >= 0 &&
+        (unsigned int)s->diag.op_active < HFSPLUS_OP_COUNT)
+        ++s->diag.flush_op_count[s->diag.op_active];
     if (storage_flush())
         return HFS_RO_IO;
 #else
@@ -244,6 +247,9 @@ int overlay_sync_entry(struct hfs_state *s, unsigned int index)
     overlay_encode_entry(&s->overlay.entries[index], raw);
     int rc = overlay_container_write(s, overlay_entry_offset(&s->overlay, index),
                                      raw, sizeof(raw));
+    /* Any in-RAM entry change invalidates the read-only path cache, even if
+     * the write or flush fails: readdir already sees the new RAM state. */
+    s->name_cache_gen++;
     return rc ? rc : overlay_flush(s);
 }
 

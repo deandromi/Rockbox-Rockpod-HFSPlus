@@ -38,6 +38,10 @@ bool find_albumart(const struct mp3entry *id3, char *buf, int buflen,
 bool search_albumart_files(const struct mp3entry *id3, const char *size_string,
                            char *buf, int buflen);
 
+/* Drop the per-directory external-art lookup cache.  Call after a folder
+ * change, USB handoff or any event that may add/remove/replace art files. */
+void albumart_cache_clear(void);
+
 void get_albumart_size(struct bitmap *bmp);
 
 #endif /* HAVE_ALBUMART */

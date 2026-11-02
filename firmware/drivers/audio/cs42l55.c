@@ -33,6 +33,11 @@
 
 static int bass, treble;
 static int active_dsp_modules;  /* powered DSP modules mask */
+/* Last encoded lineout volume written to LINEACTL/LINEBCTL (-1 = unknown).
+ * sound.c re-applies lineout volume on every volume change; the value never
+ * changes unless the user configures it, so skip the read-modify-write. */
+static int lineout_vol_l_cache = -1;
+static int lineout_vol_r_cache = -1;
 
 /* convert tenth of dB volume (-600..120) to volume register value */
 static int vol_tenthdb2hw(int db)
@@ -68,6 +73,8 @@ void audiohw_preinit(void)
     bass = 0;
     treble = 0;
     active_dsp_modules = 0;
+    lineout_vol_l_cache = -1;
+    lineout_vol_r_cache = -1;
 
     /* Ask Cirrus or maybe Apple what the hell this means */
     cscodec_write(HIDDENCTL, HIDDENCTL_UNLOCK);
@@ -111,6 +118,9 @@ void audiohw_postinit(void)
     cscodec_write(HPBCTL, 0);
     cscodec_write(LINEACTL, 0);
     cscodec_write(LINEBCTL, 0);
+    /* Both lineout registers now hold 0 dB, unmuted. */
+    lineout_vol_l_cache = 0;
+    lineout_vol_r_cache = 0;
     cscodec_write(CLSHCTL, CLSHCTL_ADPTPWR_SIGNAL);
     audiohw_mute(false);
 }
@@ -129,10 +139,19 @@ void audiohw_set_lineout_volume(int vol_l, int vol_r)
 {
     vol_l = vol_tenthdb2hw(vol_l);
     vol_r = vol_tenthdb2hw(vol_r);
-    cscodec_setbits(LINEACTL, LINEACTL_LINEAVOL_MASK | LINEACTL_LINEAMUTE,
-                    vol_l << LINEACTL_LINEAVOL_SHIFT);
-    cscodec_setbits(LINEBCTL, LINEBCTL_LINEBVOL_MASK | LINEBCTL_LINEBMUTE,
-                    vol_r << LINEBCTL_LINEBVOL_SHIFT);
+
+    if (vol_l != lineout_vol_l_cache)
+    {
+        cscodec_setbits(LINEACTL, LINEACTL_LINEAVOL_MASK | LINEACTL_LINEAMUTE,
+                        vol_l << LINEACTL_LINEAVOL_SHIFT);
+        lineout_vol_l_cache = vol_l;
+    }
+    if (vol_r != lineout_vol_r_cache)
+    {
+        cscodec_setbits(LINEBCTL, LINEBCTL_LINEBVOL_MASK | LINEBCTL_LINEBMUTE,
+                        vol_r << LINEBCTL_LINEBVOL_SHIFT);
+        lineout_vol_r_cache = vol_r;
+    }
 }
 
 void audiohw_enable_lineout(bool enable)
@@ -245,6 +264,8 @@ void audiohw_set_prescaler(int value)
 /* Nice shutdown of CS42L55 codec */
 void audiohw_close(void)
 {
+    lineout_vol_l_cache = -1;
+    lineout_vol_r_cache = -1;
     audiohw_mute(true);
     cscodec_write(HPACTL, HPACTL_HPAMUTE);
     cscodec_write(HPBCTL, HPBCTL_HPBMUTE);

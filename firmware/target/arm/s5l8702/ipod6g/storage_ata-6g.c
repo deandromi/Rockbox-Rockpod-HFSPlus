@@ -74,7 +74,19 @@ static long ata_sleep_timeout = 7 * HZ;
 static bool ata_powered;
 static bool ata_ssd_mode = false;
 static long ssd_sleep_tick;
+/* True whenever a full PATA/controller restore is required (AUTOLDO cut,
+ * power-down, failed power-up or an explicit mode switch while unpowered).
+ * The ata_power_up() clock-gate fast path is only valid when this is false. */
 static bool ssd_deep_asleep;
+/* A pre-wake event is already queued for the storage thread. */
+static bool ssd_wake_pending;
+static long ssd_wake_tick;
+/* Q_STORAGE_SLEEP was requested explicitly while the auto timeout is 0. */
+static bool ata_force_sleep;
+/* Writes happened since the last successful flush. */
+static bool ata_cache_dirty;
+/* Last time the zero-timeout idle notification was posted. */
+static long ata_idle_notify_tick;
 static struct semaphore mmc_wakeup;
 static struct semaphore mmc_comp_wakeup;
 #ifdef HAVE_ATA_DMA
@@ -657,6 +669,7 @@ static int ata_power_up(void)
     logf("ata POWERUP %ld", current_tick);
 
     ata_set_active();
+    ssd_wake_pending = false;
 
     if (ata_ssd_mode && !ceata) {
         if (!ssd_deep_asleep) {
@@ -665,8 +678,8 @@ static int ata_power_up(void)
             ata_powered = true;
             return 0;
         }
-        ssd_deep_asleep = false;
-        /* Fall through to full PATA init below */
+        /* Keep ssd_deep_asleep set until the full restore succeeds.  On a
+         * failure the next power-up must not take the clock-gate fast path. */
     }
 
     ide_power_enable(true);
@@ -786,12 +799,18 @@ static int ata_power_up(void)
     }
 
     ata_powered = true;
+    ssd_deep_asleep = false;   /* full restore complete */
     ata_set_active();
     return 0;
 }
 
 static void ata_power_down(void)
 {
+    /* A powered-down controller has no valid PATA/clock-gate state.  Mark
+     * that a full restore is needed even if the power flag was already
+     * clear, so the SSD fast path can never skip the restore. */
+    ssd_deep_asleep = true;
+
     if (!ata_powered)
         return;
 
@@ -934,6 +953,8 @@ static int ata_transfer_sectors(uint64_t sector, int count, void* buffer, int wr
         ata_power_up();
     if (sector + count > total_sectors)
         RET_ERR(0);
+    if (write && count)
+        ata_cache_dirty = true;  /* even a failed write may have been cached */
     ata_set_active();
     if (ata_dma) {
         int xfer_size = count * log_sector_size;
@@ -1074,9 +1095,11 @@ int ata_write_sectors(IF_MD(int drive,) sector_t start, int count,
 void ata_spindown(int seconds)
 {
     ata_sleep_timeout = seconds * HZ;
+    if (seconds != 0)
+        ata_force_sleep = false;  /* a pending explicit SSD sleep is SSD-only */
 }
 
-static void ata_flush_cache(void)
+static int ata_flush_cache(void)
 {
     uint8_t cmd;
 
@@ -1085,45 +1108,73 @@ static void ata_flush_cache(void)
     if (ceata) {
         memset(ceata_taskfile, 0, 16);
         ceata_taskfile[0xf] = CMD_FLUSH_CACHE_EXT;  /* CE-ATA only supports EXT */
-        ceata_wait_idle();
-        ceata_write_multiple_register(0, ceata_taskfile, 16);
-        ceata_wait_idle();
-    } else {
-        if (!canflush) {
-            return;
-        } else if (ata_lba48 && identify_info[83] & BIT(13)) {
-            cmd = CMD_FLUSH_CACHE_EXT; /* Flag, optional, ATA-6 and up, for use with LBA48 devices. Mandatory for CE-ATA */
-        } else if (identify_info[83] & BIT(12)) {
-            cmd = CMD_FLUSH_CACHE; /* Flag, mandatory, ATA-6 and up */
-        } else if (identify_info[80] >= BIT(5)) {  /* Use >= instead of '&' because bits lower than the latest standard we support don't have to be set */
-            cmd = CMD_FLUSH_CACHE; /* No flag, mandatory, ATA-5  (Optional for ATA-4) */
-        } else {
-            /* If neither command is supported then don't issue it. */
-            canflush = 0;
-            return;
-        }
-
-        ata_wait_for_rdy(1000000);
-        ata_write_cbr(&ATA_PIO_DVR, 0);
-        ata_write_cbr(&ATA_PIO_CSD, cmd);
-        ata_wait_for_rdy(1000000);
+        PASS_RC(ceata_wait_idle(), 2, 0);
+        PASS_RC(ceata_write_multiple_register(0, ceata_taskfile, 16), 2, 1);
+        PASS_RC(ceata_wait_idle(), 2, 2);
+        ata_cache_dirty = false;
+        return 0;
     }
+
+    if (!canflush) {
+        /* No flush command is available; the driver cannot do better than
+         * the device's own writeback.  Do not report a permanent error. */
+        ata_cache_dirty = false;
+        return 0;
+    } else if (ata_lba48 && identify_info[83] & BIT(13)) {
+        cmd = CMD_FLUSH_CACHE_EXT; /* Flag, optional, ATA-6 and up, for use with LBA48 devices. Mandatory for CE-ATA */
+    } else if (identify_info[83] & BIT(12)) {
+        cmd = CMD_FLUSH_CACHE; /* Flag, mandatory, ATA-6 and up */
+    } else if (identify_info[80] >= BIT(5)) {  /* Use >= instead of '&' because bits lower than the latest standard we support don't have to be set */
+        cmd = CMD_FLUSH_CACHE; /* No flag, mandatory, ATA-5  (Optional for ATA-4) */
+    } else {
+        /* If neither command is supported then don't issue it. */
+        canflush = 0;
+        ata_cache_dirty = false;
+        return 0;
+    }
+
+    PASS_RC(ata_wait_for_rdy(1000000), 2, 3);
+    ata_write_cbr(&ATA_PIO_DVR, 0);
+    ata_write_cbr(&ATA_PIO_CSD, cmd);
+    PASS_RC(ata_wait_for_rdy(1000000), 2, 4);
+
+    ata_cache_dirty = false;
+    return 0;
 }
 
 int ata_flush(void)
 {
-    if (ata_powered) {
-        mutex_lock(&ata_mutex);
-        ata_flush_cache();
-        mutex_unlock(&ata_mutex);
+    int rc;
+
+    if (!ata_powered) {
+        /* ata_sleepnow() flushes before gating/standby, so a clean cache
+         * needs no command.  A dirty cache here means a power-down happened
+         * without a successful flush (e.g. a reset error); report it instead
+         * of pretending the data is durable. */
+        return ata_cache_dirty ? -1 : 0;
     }
-    return 0;
+
+    mutex_lock(&ata_mutex);
+    if (!ata_powered)  /* sleep won the race */
+        rc = ata_cache_dirty ? -1 : 0;
+    else
+        rc = ata_flush_cache();
+    mutex_unlock(&ata_mutex);
+    return rc;
 }
 
 void ata_sleepnow(void)
 {
     mutex_lock(&ata_mutex);
 
+    if (!ata_powered) {
+        /* Already gated/asleep: nothing to flush or power down. */
+        mutex_unlock(&ata_mutex);
+        return;
+    }
+
+    /* Sleep still proceeds on a flush error; the error is reported by the
+     * next ata_flush() because ata_cache_dirty stays set. */
     ata_flush_cache();
 
     if (ceata) {
@@ -1167,25 +1218,49 @@ void ata_sleepnow(void)
 
 void ata_spin(void)
 {
-    if (ata_ssd_mode && !ata_powered)
+    /* Explicit user/plugin activity cancels a pending explicit sleep. */
+    ata_force_sleep = false;
+
+    if (ata_ssd_mode && !ata_powered
+        && (!ssd_wake_pending
+            || TIME_AFTER(current_tick, ssd_wake_tick + HZ)))
     {
-        mutex_lock(&ata_mutex);
-        if (!ata_powered)
-            ata_power_up();
-        mutex_unlock(&ata_mutex);
+        /* Do not block the UI thread on a full SSD restore (AUTOLDO cut can
+         * take hundreds of milliseconds).  Ask the storage thread to power
+         * up in the background; any real I/O still performs a synchronous
+         * ata_power_up() if the request has not completed yet. */
+        ssd_wake_pending = true;
+        ssd_wake_tick = current_tick;
+        storage_post_event(Q_STORAGE_PRE_WAKE, 0);
     }
     ata_set_active();
 }
 
 void ata_set_storage_mode(int mode)
 {
+    bool want_ssd;
+
     /* 0=auto, 1=HDD, 2=SSD */
     if (mode == 2)
-        ata_ssd_mode = true;
+        want_ssd = true;
     else if (mode == 1)
-        ata_ssd_mode = false;
+        want_ssd = false;
     else /* auto */
-        ata_ssd_mode = ata_disk_isssd();
+        want_ssd = ata_disk_isssd();
+
+    if (want_ssd && !ata_ssd_mode && !ata_powered)
+    {
+        /* Switching to the SSD path while powered down: the controller state
+         * is not a known clock-gated state, so require a full restore. */
+        ssd_deep_asleep = true;
+    }
+    if (!want_ssd)
+    {
+        ssd_wake_pending = false;
+        ata_force_sleep = false;
+    }
+
+    ata_ssd_mode = want_ssd;
 }
 
 bool ata_get_ssd_mode(void)
@@ -1206,7 +1281,12 @@ int ata_init(void)
     semaphore_init(&mmc_comp_wakeup, 1, 0);
     ceata = PDAT(11) & BIT(1);
     ata_powered = false;
-    ssd_deep_asleep = false;
+    ssd_deep_asleep = true;    /* full restore required for the first power-up */
+    ssd_wake_pending = false;
+    ssd_wake_tick = 0;
+    ata_force_sleep = false;
+    ata_cache_dirty = false;
+    ata_idle_notify_tick = 0;
     ssd_sleep_tick = 0;
     total_sectors = 0;
 
@@ -1343,13 +1423,25 @@ int ata_event(long id, intptr_t data)
        the first case is frequently hit anyway. */
     if (LIKELY(id == Q_STORAGE_TICK))
     {
-        /* A zero spindown timeout means "never sleep".  The generic ATA
-         * driver already treats zero this way, but the iPod 6G driver used
-         * to fall through and request sleep immediately.  Keep storage
-         * asserted active when the timeout is disabled. */
-        if (!ata_powered || ata_sleep_timeout == 0 ||
-            TIME_BEFORE(current_tick, ata_last_activity_value + ata_sleep_timeout))
+        /* A zero spindown timeout means "no automatic sleep", not "no idle
+         * notifications".  Keep storage asserted active, but periodically
+         * ask the storage thread to run the deferred idle callbacks so
+         * settings/status writes are not deferred until shutdown.
+         *
+         * Q_STORAGE_SLEEP is still honored for the SSD clock-gate path even
+         * when the automatic timeout is disabled; the HDD standby path stays
+         * disabled because that is the unsafe resume case. */
+        bool auto_sleep = ata_sleep_timeout != 0;
+        bool explicit_sleep = !auto_sleep && ata_force_sleep;
+        bool allow_sleep = auto_sleep || explicit_sleep;
+        long sleep_timeout = auto_sleep ? ata_sleep_timeout : HZ / 5;
+
+        if (!ata_powered || !allow_sleep ||
+            TIME_BEFORE(current_tick, ata_last_activity_value + sleep_timeout))
         {
+            if (!ata_powered)
+                ata_force_sleep = false;  /* request already satisfied */
+
             /* Phase 2: SSD deep sleep — cut AUTOLDO after 30s of
              * clock-gate sleep when backlight is off */
             if (ata_ssd_mode && !ata_powered && !ssd_deep_asleep
@@ -1370,7 +1462,20 @@ int ata_event(long id, intptr_t data)
                 }
                 mutex_unlock(&ata_mutex);
             }
+
             STG_EVENT_ASSERT_ACTIVE(STORAGE_ATA);
+
+            if (ata_powered && !allow_sleep
+                && TIME_AFTER(current_tick, ata_last_activity_value + 3 * HZ)
+                && TIME_AFTER(current_tick, ata_idle_notify_tick + 5 * HZ))
+            {
+                ata_idle_notify_tick = current_tick;
+                storage_post_event(Q_STORAGE_IDLE_NOTIFY, 0);
+            }
+        }
+        else if (explicit_sleep)
+        {
+            ata_force_sleep = false;  /* one explicit sleep request granted */
         }
     }
     else if (id == Q_STORAGE_SLEEPNOW)
@@ -1379,10 +1484,25 @@ int ata_event(long id, intptr_t data)
     }
     else if (id == Q_STORAGE_SLEEP)
     {
-        ata_last_activity_value = current_tick - ata_sleep_timeout + HZ / 5;
+        if (ata_sleep_timeout != 0)
+        {
+            /* Existing behaviour: make the next tick evaluate the sleep
+             * deadline almost immediately. */
+            ata_last_activity_value = current_tick - ata_sleep_timeout + HZ / 5;
+        }
+        else if (ata_ssd_mode)
+        {
+            /* Explicit sleep request with automatic spindown disabled.
+             * Clock gating is reversible, so honor it for SSD only. */
+            ata_force_sleep = true;
+        }
+        /* HDD with a zero timeout: leave the drive active. */
     }
     else if (id == Q_STORAGE_PRE_WAKE)
     {
+        /* A wake request means whatever asked to sleep is stale. */
+        ata_force_sleep = false;
+
         if (ata_ssd_mode && !ata_powered)
         {
             mutex_lock(&ata_mutex);

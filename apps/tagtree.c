@@ -216,6 +216,35 @@ static int rootmenu;
 static int current_offset;
 static int current_entry_count;
 
+/* Resume cursor for the unfiltered title/filename searches used by the
+ * database browser.  tagtree_get_entry() asks for a new chunk whenever the
+ * user scrolls past the loaded window; without a cursor each request starts
+ * the search at entry 0 and re-reads every skipped tag.  Only the direct
+ * tag stream is resumable, so the cursor is restricted to the exact same
+ * table/tag with no filters or clauses.  Filtered views keep their existing
+ * behaviour and restart the search.
+ *
+ * The tagcache_search itself is not kept alive between chunks: it holds the
+ * tagcache write lock and open descriptors, which must not survive a UI
+ * iteration.  Saving the byte position and remaining entry count is enough
+ * to continue the direct stream later.  Any other offset, a table load or an
+ * unload drops the cursor. */
+static struct tagtree_search_cursor
+{
+    bool valid;
+    struct tree_context *ctx;
+    int table;
+    int extra;
+    int tag;
+    int next_offset;
+    struct tagcache_search_cursor cursor;
+} search_cursor;
+
+static void tagtree_cursor_reset(void)
+{
+    search_cursor.valid = false;
+}
+
 static struct tree_context *tc;
 
 static int max_history_level; /* depth of menu levels with applicable history */
@@ -1383,6 +1412,8 @@ static bool parse_menu(const char *filename)
 
 static void tagtree_unload(struct tree_context *c)
 {
+    tagtree_cursor_reset();
+
     /* may be spurious... */
     core_pin(tagtree_handle);
 
@@ -1600,6 +1631,9 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
     bool sort = false;
     bool sort_inverse;
     bool is_basename = false;
+    bool direct_search = false;
+    bool resumed = false;
+    bool cursor_ok = false;
     int sort_limit;
     int strip;
 
@@ -1673,9 +1707,38 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
             tagcache_search_add_clause(&tcs, csi->clause[i][j]);
     }
 
+    /* The cursor can only resume the direct, unfiltered tag stream.  Filters
+     * and clauses advance through their own seek list, and other offsets
+     * would skip a different number of rows. */
+    direct_search = (tag == tag_title || tag == tag_filename) &&
+                    level == 0 && tcs.filter_count == 0 &&
+                    tcs.clause_count == 0;
+    cursor_ok = direct_search && !init;
+
+    if (init || !direct_search)
+    {
+        tagtree_cursor_reset();
+    }
+    else if (search_cursor.valid &&
+             search_cursor.ctx == c &&
+             search_cursor.table == c->currtable &&
+             search_cursor.extra == c->currextra &&
+             search_cursor.tag == tag &&
+             search_cursor.next_offset == offset &&
+             tagcache_search_restore_cursor(&tcs, &search_cursor.cursor))
+    {
+        resumed = true;
+    }
+    else
+    {
+        tagtree_cursor_reset();
+    }
+
     current_offset = offset;
     current_entry_count = 0;
     c->dirfull = false;
+    if (resumed)
+        total_count = offset;
 
     fmt = NULL;
     for (i = 0; i < format_count; i++)
@@ -1846,6 +1909,7 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
                         logf("chunk mode #2: %d", current_entry_count);
                         c->dirfull = true;
                         sort = false;
+                        cursor_ok = false; /* this row was fetched but not stored */
                         break;
                     }
 
@@ -1876,6 +1940,7 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
                     logf("chunk mode #2a: %d", current_entry_count);
                     c->dirfull = true;
                     sort = false;
+                    cursor_ok = false; /* this row was fetched but not stored */
                     break ;
                 }
             }
@@ -1908,6 +1973,23 @@ entry_skip_formatter:
                 return current_entry_count;
             }
         }
+    }
+
+    /* Remember where this chunk stopped so the next contiguous chunk can
+     * continue instead of re-reading from entry 0. */
+    if (cursor_ok &&
+        tagcache_search_save_cursor(&tcs, &search_cursor.cursor))
+    {
+        search_cursor.valid = true;
+        search_cursor.ctx = c;
+        search_cursor.table = c->currtable;
+        search_cursor.extra = c->currextra;
+        search_cursor.tag = tag;
+        search_cursor.next_offset = offset + current_entry_count;
+    }
+    else
+    {
+        tagtree_cursor_reset();
     }
 
     if (sort)
@@ -2779,9 +2861,28 @@ static struct tagentry* tagtree_get_entry(struct tree_context *c, int id)
     /* Load the next chunk if necessary. */
     if (realid >= current_entry_count || realid < 0)
     {
+        int new_offset;
+
+        if (realid >= current_entry_count &&
+            id == current_offset + current_entry_count &&
+            search_cursor.valid && search_cursor.ctx == c &&
+            search_cursor.table == c->currtable &&
+            search_cursor.extra == c->currextra &&
+            search_cursor.next_offset == id)
+        {
+            /* Just past the loaded window: continue the same search at its
+             * end so retrieve_entries() can resume its cursor.  Centering
+             * here would rewind half a chunk and force a full rescan. */
+            new_offset = id;
+        }
+        else
+        {
+            /* Random/backward jump: keep the original centred window. */
+            new_offset = MAX(0, id - (current_entry_count / 2));
+        }
+
         cpu_boost(true);
-        if (retrieve_entries(c, MAX(0, id - (current_entry_count / 2)),
-                             false) < 0)
+        if (retrieve_entries(c, new_offset, false) < 0)
         {
             logf("retrieve failed");
             cpu_boost(false);

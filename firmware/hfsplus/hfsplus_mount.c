@@ -33,9 +33,16 @@ void hfsplus_init(void)
     usb_hfs_unit = 0;
     for (unsigned int i = 0; i < HFS_NUM_VOLUMES; ++i) {
         hfs_ro_unmount(&hfs_states[i].volume);
+#ifdef BOOTLOADER
+        /* BSS is already zero and the bootloader never loads an overlay.
+         * Avoid rewriting the 708 KiB overlay member on every init. */
+        hfs_states[i].overlay.ready = 0;
+#else
         memset(&hfs_states[i].overlay, 0, sizeof(hfs_states[i].overlay));
+#endif
         memset(&hfs_states[i].diag, 0, sizeof(hfs_states[i].diag));
         hfs_states[i].diag.ovl_slot = -1;
+        hfs_states[i].diag.op_active = -1;
         hfs_states[i].force_readonly = 0;
         mutex_init(&hfs_states[i].mutex);
     }
@@ -238,8 +245,9 @@ static int hfsplus_mount_indexes(struct hfs_state *s)
 static void hfsplus_mount_overlay(struct hfs_state *s)
 {
 #ifdef BOOTLOADER
-    /* Native-only: never publish or trust the overlay. */
-    memset(&s->overlay, 0, sizeof(s->overlay));
+    /* Native-only: never publish or trust the overlay.  The member is zero
+     * BSS and is not cleared again here; only the readiness gate matters. */
+    s->overlay.ready = 0;
     s->force_readonly = 1;
 #else
     int rc = overlay_load(s);
@@ -271,6 +279,11 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
     s->diag.ovl_reason = (int)HFS_OVL_REASON_NONE;
     s->diag.index_cache = 0;
     s->diag.flush_ops = 0;
+    memset(s->diag.op_count, 0, sizeof(s->diag.op_count));
+    memset(s->diag.flush_op_count, 0, sizeof(s->diag.flush_op_count));
+    s->diag.op_active = -1;
+    /* A previous volume may have populated the path cache. */
+    s->name_cache_gen++;
     s->force_readonly = 0;
     int rc = setup_io(&s->io, drive);
     if (rc) {
@@ -314,7 +327,11 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
         rc = hfsplus_mount_indexes(s);
     if (rc) {
         /* Never leave a partially initialized volume published as mounted. */
+#ifndef BOOTLOADER
         memset(&s->overlay, 0, sizeof(s->overlay));
+#else
+        s->overlay.ready = 0;
+#endif
         s->force_readonly = 0;
         hfs_ro_unmount(&s->volume);
     }
@@ -332,6 +349,7 @@ void hfsplus_unmount(int volume)
 {
     if ((unsigned int)volume < HFS_NUM_VOLUMES) {
         struct hfs_state *s = &hfs_states[volume];
+#ifndef BOOTLOADER
         if (s->overlay.ready && s->overlay.header_dirty) {
             mutex_lock(&s->mutex);
             int rc = overlay_sync_header(s);
@@ -343,7 +361,13 @@ void hfsplus_unmount(int volume)
             }
             mutex_unlock(&s->mutex);
         }
+#endif
+#ifndef BOOTLOADER
         memset(&s->overlay, 0, sizeof(s->overlay));
+#else
+        s->overlay.ready = 0;
+#endif
+        s->name_cache_gen++;
         s->force_readonly = 0;
         hfs_ro_unmount(&s->volume);
     }

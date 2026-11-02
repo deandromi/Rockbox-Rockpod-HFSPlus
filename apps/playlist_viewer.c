@@ -280,7 +280,7 @@ static bool retrieve_id3_tags(const int index, const char* name, struct mp3entry
     }
     else
     {
-#if defined(HAVE_TC_RAMCACHE) && defined(HAVE_DIRCACHE)
+#if defined(HAVE_TAGCACHE) && defined(HAVE_TC_RAMCACHE)
         /* Try tagcache first (in-RAM, no disk spinup) */
         id3_retrieval_successful = tagcache_fill_tags(id3, name);
         if (!id3_retrieval_successful)
@@ -519,17 +519,32 @@ static void format_name(char* dest, const char* src, size_t bufsz)
     }
 }
 
+/* Only the ID3 title views need tag data.  Filename and full-path views must
+ * not parse metadata just to draw a row. */
+static bool playlist_viewer_wants_tags(void)
+{
+    switch (global_settings.playlist_viewer_track_display)
+    {
+        case PLAYLIST_VIEWER_ENTRY_SHOW_ID3_TITLE:
+        case PLAYLIST_VIEWER_ENTRY_SHOW_ID3_TITLE_AND_ALBUM:
+            return true;
+        default:
+            return false;
+    }
+}
+
 /* Format display line */
 static void format_line(struct playlist_entry* track, char* str,
                         int len)
 {
     char *id3viewc = NULL;
     char *skipped = "";
+    bool want_tags = playlist_viewer_wants_tags();
     if (track->attr & PLAYLIST_ATTR_SKIPPED)
         skipped = "(ERR) ";
-    if (!(track->attr & PLAYLIST_ATTR_RETRIEVE_ID3_ATTEMPTED))
+    if (want_tags && !(track->attr & PLAYLIST_ATTR_RETRIEVE_ID3_ATTEMPTED))
     {
-        /* iPod Classic 6G custom: always retrieve title from tags/db */
+        /* Retrieve the title from tags/db only for title display modes */
         track->attr |= PLAYLIST_ATTR_RETRIEVE_ID3_ATTEMPTED;
         bool retrieve_success = retrieve_id3_tags(track->index, track->name,
                                                   viewer.id3,
@@ -554,7 +569,7 @@ static void format_line(struct playlist_entry* track, char* str,
         }
     }
 
-    if (!(track->attr & PLAYLIST_ATTR_RETRIEVE_ID3_SUCCEEDED))
+    if (!want_tags || !(track->attr & PLAYLIST_ATTR_RETRIEVE_ID3_SUCCEEDED))
     {
         /* Simply use a formatted file name */
         char name[MAX_PATH];

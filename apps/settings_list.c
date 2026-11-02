@@ -1495,7 +1495,8 @@ const struct settings_list settings[] = {
 #ifdef HAVE_DISK_STORAGE
     /* iPod flash adapters can fail to resume after ATA sleep.  Permit 0
      * seconds as a real "never sleep" value; the storage driver handles
-     * it without entering standby. */
+     * it without entering standby.  Zero disables automatic sleep only:
+     * deferred storage-idle callbacks still run periodically. */
     INT_SETTING(F_TIME_SETTING, disk_spindown, LANG_SPINDOWN, 0, "disk spindown",
                     UNIT_SEC, 0, 254, 1, NULL, NULL, STORAGE_FUNCTION(spindown)),
     CHOICE_SETTING(0, storage_mode, LANG_STORAGE_MODE, 0,

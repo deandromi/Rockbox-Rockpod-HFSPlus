@@ -1502,6 +1502,24 @@ static int disk_callback(int btn, struct gui_synclist *lists)
                        hfsplus_index_cache_used(0) ? "HIT" : "MISS");
     simplelist_addline("I/O r/w/f: %u/%u/%u", hfsplus_io_reads(0),
                        hfsplus_io_writes(0), hfsplus_io_flushes(0));
+    simplelist_addline("Ovl high water: %u",
+                       hfsplus_overlay_high_water(0));
+    simplelist_addline("Ovl ops c/w/x: %u/%u/%u",
+                       hfsplus_io_op_count(0, HFSPLUS_OP_CREATE),
+                       hfsplus_io_op_count(0, HFSPLUS_OP_WRITE),
+                       hfsplus_io_op_count(0, HFSPLUS_OP_CLOSE));
+    simplelist_addline("Ovl ops rn/rm/cfg: %u/%u/%u",
+                       hfsplus_io_op_count(0, HFSPLUS_OP_RENAME),
+                       hfsplus_io_op_count(0, HFSPLUS_OP_REMOVE),
+                       hfsplus_io_op_count(0, HFSPLUS_OP_SETTINGS));
+    simplelist_addline("Ovl fl c/w/x: %u/%u/%u",
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_CREATE),
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_WRITE),
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_CLOSE));
+    simplelist_addline("Ovl fl rn/rm/cfg: %u/%u/%u",
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_RENAME),
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_REMOVE),
+                       hfsplus_io_op_flushes(0, HFSPLUS_OP_SETTINGS));
     if (ovl_stage >= 8 && ovl_slot >= 0) {
         simplelist_addline("Ovl id/parent: %08lx/%08lx",
             (unsigned long)hfsplus_overlay_diag_id_vol(0),

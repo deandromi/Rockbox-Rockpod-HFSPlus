@@ -39,6 +39,7 @@
 #define HFS_OVL_SHRINK_HYSTERESIS 64u  /* keep <=256 KiB slack to avoid churn */
 #define HFS_OVL_CACHE_BLOCKS      64u  /* v3 directory/CNID index cache */
 #define HFS_OVL_CACHE_BYTES       (HFS_OVL_CACHE_BLOCKS * HFS_OVL_BLOCK)
+#define HFS_OVL_HIGH_WATER_CHUNK  64u  /* reserve slots per v3 header flush */
 #define HFS_OVL_STATE_READY       0u
 #define HFS_OVL_STATE_INIT        1u
 
@@ -92,6 +93,10 @@ struct hfs_overlay {
     uint16_t id_tombstones;
     uint16_t parent_head[HFS_OVL_PARENT_HASH_SIZE];
     uint8_t header_dirty;
+    /* RAM-only: the parent chain is complete and safe for readdir.  Legacy
+     * v1/v2 images and any repaired/corrupt chain fall back to a bounded
+     * linear scan. */
+    uint8_t parent_index_ok;
     uint16_t parent_next[HFS_OVL_MAX_ENTRIES];
 };
 
@@ -106,6 +111,16 @@ static inline int overlay_entry_visible(const struct hfs_overlay *o,
                                         unsigned int index)
 {
     return index < HFS_OVL_MAX_ENTRIES && !o->shadowed[index];
+}
+
+/* Number of entry slots that can exist in this overlay.  v3 persists a
+ * high-water bound; v1/v2 predate it and keep the full-table scan. */
+static inline unsigned int overlay_entry_limit(const struct hfs_overlay *o)
+{
+    if (o->version == HFS_OVL_VERSION_3 &&
+        o->entry_high_water <= HFS_OVL_MAX_ENTRIES)
+        return o->entry_high_water;
+    return HFS_OVL_MAX_ENTRIES;
 }
 
 static inline int overlay_bit(const struct hfs_overlay *o, uint32_t block)

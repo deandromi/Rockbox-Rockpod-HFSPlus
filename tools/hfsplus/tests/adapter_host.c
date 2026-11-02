@@ -252,11 +252,16 @@ static int test_enospc(void)
     CHECK(mount_image() == 0);
     CHECK(hfsplus_overlay_ready(0));
     CHECK(!hfsplus_open_root(0, &root));
+    unsigned int flush_before = hfsplus_io_flushes(0);
     for (int i = 0; i < 2048; ++i) {
         snprintf(name, sizeof(name), "f%04d", i);
         rc = hfsplus_create_file(&root, name, ATTR_ARCHIVE, &file, NULL);
         CHECK(rc == 0);
     }
+    unsigned int flush_after = hfsplus_io_flushes(0);
+    /* One entry sync per create, plus one header reserve per 64 slots.  The
+     * old per-slot high-water update cost a second flush on every create. */
+    CHECK(flush_after - flush_before <= 2048u + 64u);
     snprintf(name, sizeof(name), "overflow");
     rc = hfsplus_create_file(&root, name, ATTR_ARCHIVE, &file, NULL);
     CHECK(rc == FAT_RC_ENOSPC);
@@ -434,6 +439,214 @@ static int test_diag(void)
            hfsplus_index_cache_used(0), hfsplus_overlay_format_version(0));
     printf("io_reads=%u io_writes=%u io_flushes=%u\n",
            hfsplus_io_reads(0), hfsplus_io_writes(0), hfsplus_io_flushes(0));
+    printf("high_water=%u op_create=%u op_write=%u op_close=%u "
+           "op_rename=%u op_remove=%u op_settings=%u\n",
+           hfsplus_overlay_high_water(0),
+           hfsplus_io_op_count(0, HFSPLUS_OP_CREATE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_WRITE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_CLOSE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_RENAME),
+           hfsplus_io_op_count(0, HFSPLUS_OP_REMOVE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_SETTINGS));
+    hfsplus_unmount(0);
+    return 0;
+}
+
+static int test_ops(void)
+{
+    struct fat_file root, file;
+    unsigned int create, write, close, rename, remove, settings;
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    create = hfsplus_io_op_count(0, HFSPLUS_OP_CREATE);
+    write = hfsplus_io_op_count(0, HFSPLUS_OP_WRITE);
+    close = hfsplus_io_op_count(0, HFSPLUS_OP_CLOSE);
+    rename = hfsplus_io_op_count(0, HFSPLUS_OP_RENAME);
+    remove = hfsplus_io_op_count(0, HFSPLUS_OP_REMOVE);
+    settings = hfsplus_io_op_count(0, HFSPLUS_OP_SETTINGS);
+    CHECK(hfsplus_create_file(&root, "config.cfg", ATTR_ARCHIVE, &file,
+                              NULL) == 0);
+    CHECK(write_file(&file, "settings") == 0);
+    CHECK(hfsplus_rename(&root, &file,
+                         (const unsigned char *)"config.cfg.new") == 0);
+    CHECK(hfsplus_remove(&file, FAT_RM_ALL) == 0);
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_CREATE) == create + 1);
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_WRITE) == write + 1);
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_CLOSE) == close + 1);
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_RENAME) == rename + 1);
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_REMOVE) == remove + 1);
+    /* Create, data write, close, rename and remove are all attributable to
+     * the settings basename. */
+    CHECK(hfsplus_io_op_count(0, HFSPLUS_OP_SETTINGS) >= settings + 4);
+    CHECK(hfsplus_io_op_flushes(0, HFSPLUS_OP_SETTINGS) > 0);
+    printf("op_create=%u op_write=%u op_close=%u op_rename=%u "
+           "op_remove=%u op_settings=%u flush_settings=%u\n",
+           hfsplus_io_op_count(0, HFSPLUS_OP_CREATE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_WRITE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_CLOSE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_RENAME),
+           hfsplus_io_op_count(0, HFSPLUS_OP_REMOVE),
+           hfsplus_io_op_count(0, HFSPLUS_OP_SETTINGS),
+           hfsplus_io_op_flushes(0, HFSPLUS_OP_SETTINGS));
+    hfsplus_unmount(0);
+    return 0;
+}
+
+static int test_grow_copy(void)
+{
+    struct fat_file root, file;
+    struct fat_filestr fs;
+    const size_t first = 80 * 512;   /* 40 KiB: more than two copy chunks */
+    const size_t second = 512;
+    uint8_t *in = malloc(first + second);
+    uint8_t *out = malloc(first + second);
+    int rc;
+    CHECK(in && out);
+    for (size_t i = 0; i < first; ++i)
+        in[i] = (uint8_t)(i * 7u);
+    memset(in + first, 0xaa, second);
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    CHECK(hfsplus_create_file(&root, "big.bin", ATTR_ARCHIVE, &file, NULL) == 0);
+    memset(&fs, 0, sizeof(fs));
+    fs.fatfilep = &file;
+    CHECK(hfsplus_readwrite(&fs, first / 512, in, true) ==
+          (long)(first / 512));
+    CHECK(hfsplus_closewrite(&fs, (uint32_t)first, NULL) == 0);
+    /* Extend without rewriting the old bytes, forcing a realloc copy. */
+    CHECK(hfsplus_seek(&fs, first / 512) == 0);
+    CHECK(hfsplus_readwrite(&fs, second / 512, in + first, true) == 1);
+    CHECK(hfsplus_closewrite(&fs, (uint32_t)(first + second), NULL) == 0);
+    /* Exercise the same entry after a remount. */
+    hfsplus_unmount(0);
+    CHECK(mount_image() == 0);
+    CHECK(!hfsplus_open_root(0, &root));
+    CHECK(open_path("big.bin", NULL, &root, &file) == 0);
+    memset(&fs, 0, sizeof(fs));
+    fs.fatfilep = &file;
+    CHECK(hfsplus_seek(&fs, 0) == 0);
+    rc = (int)hfsplus_readwrite(&fs, (first + second) / 512, out, false);
+    CHECK(rc == (int)((first + second) / 512));
+    CHECK(!memcmp(out, in, first + second));
+    hfsplus_unmount(0);
+    free(in);
+    free(out);
+    return 0;
+}
+
+/* Enumerate a directory and count the two fixture files.  "x" is reserved for
+ * the high-water test's corrupt slot-500 entry, which must stay invisible when
+ * the v3 bound excludes it. */
+static int test_readdir(void)
+{
+    struct fat_file root;
+    struct fat_direntry e;
+    int a = 0, b = 0, x = 0;
+    CHECK(mount_image() == 0);
+    CHECK(!hfsplus_open_root(0, &root));
+    CHECK(find(&root, "a.txt", &e) == 1);
+    {
+        struct fat_filestr st;
+        struct fat_dirscan_info sc;
+        memset(&st, 0, sizeof(st));
+        memset(&sc, 0, sizeof(sc));
+        sc.entry = FAT_DIRSCAN_RW_VAL;
+        st.fatfilep = &root;
+        while (hfsplus_readdir(&st, &sc, &e) > 0) {
+            if (!strcmp((char *)e.name, "a.txt"))
+                ++a;
+            else if (!strcmp((char *)e.name, "b.txt"))
+                ++b;
+            else if (!strcmp((char *)e.name, "x"))
+                ++x;
+        }
+    }
+    CHECK(a == 1 && b == 1 && x == 0);
+    hfsplus_unmount(0);
+    return 0;
+}
+
+static int test_find(void)
+{
+    struct fat_file root, file;
+    struct fat_filestr st;
+    struct fat_direntry e;
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    memset(&st, 0, sizeof(st));
+    st.fatfilep = &root;
+
+    CHECK(hfsplus_find(&st, "Music", &e) == 1);
+    CHECK(!strcmp((char *)e.name, "Music"));
+    CHECK(hfsplus_find(&st, "missing.txt", &e) == 0);
+    CHECK(hfsplus_find(&st, "missing.txt", &e) == 0); /* negative cache */
+
+    CHECK(hfsplus_create_file(&root, "new.txt", ATTR_ARCHIVE, &file,
+                              NULL) == 0);
+    CHECK(hfsplus_find(&st, "new.txt", &e) == 1);
+    CHECK(hfsplus_rename(&root, &file,
+                         (const unsigned char *)"renamed.txt") == 0);
+    CHECK(hfsplus_find(&st, "new.txt", &e) == 0);
+    CHECK(hfsplus_find(&st, "renamed.txt", &e) == 1);
+    CHECK(hfsplus_remove(&file, FAT_RM_ALL) == 0);
+    CHECK(hfsplus_find(&st, "renamed.txt", &e) == 0);
+
+    hfsplus_unmount(0);
+    return 0;
+}
+
+static int count_children(struct fat_file *dir, const char *prefix)
+{
+    struct fat_filestr st;
+    struct fat_dirscan_info sc;
+    struct fat_direntry e;
+    int count = 0;
+    memset(&st, 0, sizeof(st));
+    memset(&sc, 0, sizeof(sc));
+    sc.entry = FAT_DIRSCAN_RW_VAL;
+    st.fatfilep = dir;
+    while (hfsplus_readdir(&st, &sc, &e) > 0) {
+        if (!strncmp((char *)e.name, prefix, strlen(prefix)))
+            ++count;
+    }
+    return count;
+}
+
+static int test_readdir_buckets(void)
+{
+    struct fat_file root, dir, file;
+    char name[32];
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    for (int d = 0; d < 3; ++d) {
+        snprintf(name, sizeof(name), "dir%d", d);
+        CHECK(hfsplus_create_file(&root, name, ATTR_DIRECTORY, &dir, NULL) == 0);
+        for (int i = 0; i < 40; ++i) {
+            snprintf(name, sizeof(name), "d%d_f%02d.txt", d, i);
+            CHECK(hfsplus_create_file(&dir, name, ATTR_ARCHIVE, &file,
+                                      NULL) == 0);
+        }
+    }
+    for (int d = 0; d < 3; ++d) {
+        snprintf(name, sizeof(name), "dir%d", d);
+        CHECK(open_path(name, NULL, &root, &dir) == 0);
+        snprintf(name, sizeof(name), "d%d_", d);
+        CHECK(count_children(&dir, name) == 40);
+    }
+    CHECK(count_children(&root, "d") == 3);
+    hfsplus_unmount(0);
+    CHECK(mount_image() == 0);
+    CHECK(!hfsplus_open_root(0, &root));
+    for (int d = 0; d < 3; ++d) {
+        snprintf(name, sizeof(name), "dir%d", d);
+        CHECK(open_path(name, NULL, &root, &dir) == 0);
+        snprintf(name, sizeof(name), "d%d_", d);
+        CHECK(count_children(&dir, name) == 40);
+    }
     hfsplus_unmount(0);
     return 0;
 }
@@ -465,6 +678,11 @@ int main(int argc, char **argv)
     else if (!strcmp(test, "legacy-baseid")) rc = test_legacy_baseid();
     else if (!strcmp(test, "fault")) rc = test_fault();
     else if (!strcmp(test, "diag")) rc = test_diag();
+    else if (!strcmp(test, "ops")) rc = test_ops();
+    else if (!strcmp(test, "grow-copy")) rc = test_grow_copy();
+    else if (!strcmp(test, "readdir")) rc = test_readdir();
+    else if (!strcmp(test, "find")) rc = test_find();
+    else if (!strcmp(test, "readdir-buckets")) rc = test_readdir_buckets();
     else { fprintf(stderr, "unknown test\n"); return 2; }
     if (save_image(argv[2]))
         return 2;

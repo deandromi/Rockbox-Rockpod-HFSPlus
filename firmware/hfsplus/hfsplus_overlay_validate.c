@@ -9,9 +9,10 @@
 #include <string.h>
 
 static const struct hfs_overlay_entry *
-overlay_find_id_linear(const struct hfs_overlay *o, uint32_t id)
+overlay_find_id_linear(const struct hfs_overlay *o, uint32_t id,
+                       unsigned int limit)
 {
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i)
+    for (unsigned int i = 0; i < limit; ++i)
         if ((o->entries[i].flags & HFS_OVL_USED) &&
             o->entries[i].id == id)
             return &o->entries[i];
@@ -30,6 +31,11 @@ int overlay_validate(struct hfs_overlay *o,
                      struct hfs_overlay_validation *result)
 {
     uint32_t max_id = HFS_OVL_ID_BASE - 1u;
+    /* v3 persists how many entry slots can exist.  Bound every scan by it;
+     * v1/v2 predate the high-water field and keep the full 2,048 loop.  The
+     * mark is checksummed with the header; a deliberately truncated mark is
+     * not detectable without reading the slots the bound exists to avoid. */
+    const unsigned int limit = overlay_entry_limit(o);
     result->slot = -1;
     result->reason = HFS_OVL_REASON_NONE;
     memset(o->shadowed, 0, sizeof(o->shadowed));
@@ -38,7 +44,7 @@ int overlay_validate(struct hfs_overlay *o,
      * runtime ID hash as scratch; it is rebuilt from the persistent entries
      * after validation succeeds. */
     memset(o->id_hash, 0xff, sizeof(o->id_hash));
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+    for (unsigned int i = 0; i < limit; ++i) {
         const struct hfs_overlay_entry *e = &o->entries[i];
         if (!(e->flags & HFS_OVL_USED))
             continue;
@@ -81,7 +87,7 @@ int overlay_validate(struct hfs_overlay *o,
         o->entry_blocks > o->total_blocks)
         return overlay_validate_fail(result, -1, HFS_OVL_REASON_LAYOUT);
 
-    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+    for (unsigned int i = 0; i < limit; ++i) {
         const struct hfs_overlay_entry *e = &o->entries[i];
         if (!(e->flags & HFS_OVL_USED))
             continue;
@@ -195,7 +201,7 @@ int overlay_validate(struct hfs_overlay *o,
                     return overlay_validate_fail(result, (int)i,
                                                  HFS_OVL_REASON_PARENT);
                 const struct hfs_overlay_entry *p =
-                    overlay_find_id_linear(o, parent);
+                    overlay_find_id_linear(o, parent, limit);
                 if (!p || (p->flags & (HFS_OVL_DELETED |
                                        HFS_OVL_TOMBSTONE)) ||
                     p->kind != 1)

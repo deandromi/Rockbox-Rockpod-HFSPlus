@@ -70,6 +70,29 @@ unsigned int hfsplus_io_flushes(int volume)
     return hfs_state_get(volume)->diag.flush_ops;
 }
 
+unsigned int hfsplus_io_op_count(int volume, int op)
+{
+    struct hfs_state *s = hfs_state_get(volume);
+    if (op < 0 || (unsigned int)op >= HFSPLUS_OP_COUNT)
+        return 0;
+    return s->diag.op_count[op];
+}
+
+unsigned int hfsplus_io_op_flushes(int volume, int op)
+{
+    struct hfs_state *s = hfs_state_get(volume);
+    if (op < 0 || (unsigned int)op >= HFSPLUS_OP_COUNT)
+        return 0;
+    return s->diag.flush_op_count[op];
+}
+
+unsigned int hfsplus_overlay_high_water(int volume)
+{
+    struct hfs_state *s = hfs_state_get(volume);
+    return s->overlay.version == HFS_OVL_VERSION_3 ?
+           s->overlay.entry_high_water : 0;
+}
+
 int hfsplus_overlay_last_error_vol(int volume)
 {
     return hfs_state_get(volume)->diag.ovl_error;

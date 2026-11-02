@@ -1,9 +1,10 @@
 # Next steps — V2.1.1 and later
 
-Status: V3.0 Beta built from the V2.1.1 hardware baseline. The adapter is
-decomposed, the v3 overlay format and persistent index cache are implemented,
-and the write fast path is in. Host/build verified; no device, power-loss or
-power measurement has been recorded for the v3 changes.
+Status: V3.2 Beta “Thermo-Nuclear” experimental build from the V3.0/V2.1.1
+baseline. The adapter is decomposed, the v3 overlay format and persistent index
+cache are implemented, and the read-only USB path is hardware-tested. This beta
+adds the P0/P1 efficiency portfolio; P0 hardware gates and device power/resume
+tests are not executed. See `release-v3.2-beta.md` and `v3.2-validation.md`.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 
@@ -101,17 +102,32 @@ The disk/CPU audit is in [`efficiency.md`](efficiency.md). Implemented in V3.0:
 
 - Container writes skip repeated native-bitmap validation.
 - v3 persists the directory/CNID index cache.
-- v3 high-water bounds the entry-table read.
+- v3 high-water bounds the entry-table read; new entries reserve 64 slots at a
+  time to amortize header flushes.
 - A redundant entry sync after realloc was removed.
 - Debug reports cache HIT/MISS and ATA read/write/flush counters.
 
+Implemented in V3.2 Beta (host/build only; device gates pending):
+
+- Application multipliers: persistent filename lookup, album-art directory
+  cache, tagcache fill without dircache, browser cursor, playback/viewer
+  reductions.
+- Zero-spindown idle notifications, deduplicated PRE_WAKE, async SSD pre-wake,
+  backlight/lineout write caches, ATA flush error propagation.
+- 4 KiB read-only stream read-ahead, 16 KiB overlay copies, v3 parent-bucket
+  readdir, high-water validator/load bounds, bootloader minimal state, and an
+  adapter read-only name/path cache.
+
 Still open, in priority order:
 
-1. Existing v2 containers do not get the v3 cache without a migration tool.
-2. ATA flush batching still needs a WAL/commit-group design and the hardware
+1. Physical P0 power-loss matrix, native-integrity check and 100-cycle
+   SSD/spindown resume test.
+2. Existing v2 containers do not get the v3 cache without a migration tool.
+3. ATA flush batching still needs a WAL/commit-group design and the hardware
    power-loss matrix.
-3. Full duplicate-name resolution is still O(U²).
-4. Readdir hidden-name caching remains a low-priority optimization.
+4. Full duplicate-name resolution is still O(U²); v1/v2 readdir keeps the
+   bounded linear fallback.
+5. Release-packaging and measurement items in `efficiency-paper.md` §7–§9.
 
 Do not trade crash consistency for power without the hardware matrix.
 
@@ -134,8 +150,8 @@ Do not trade crash consistency for power without the hardware matrix.
 1. Measure the V3.0 iFlash baseline: boot time, mount ATA reads/bytes,
    index-cache HIT/MISS, flushes per create/write/close/rename/delete/settings,
    idle/playback power.
-2. Chunk v3 high-water updates (reserve 64 slots, grow in 32/64-slot steps) to
-   remove per-create header flushes.
+2. **Done (host):** chunk v3 high-water updates (reserve 64 slots) to remove
+   per-create header flushes. Device flush/power measurement still pending.
 3. Build and test a v2→v3 overlay migration with backup/rollback.
 4. Measure flushes again; then decide whether a WAL/commit-group is worth the
    hardware power-loss risk.
@@ -144,6 +160,9 @@ Do not trade crash consistency for power without the hardware matrix.
    resolution, compact CNID cache, readdir hidden-name cache, BSS/double-zero.
 7. Tune general power settings after iFlash measurements: backlight,
    brightness, ATA spindown, CPU scaling.
+
+The repository-wide analysis, including inherited Rockbox and non-code
+upgrades, is in [`efficiency-paper.md`](efficiency-paper.md).
 
 ---
 

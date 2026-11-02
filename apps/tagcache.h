@@ -157,6 +157,15 @@ struct tagcache_search {
     int32_t idx_id;      /* Entry number in the master index. */
 };
 
+/* Resumable position of a direct tag stream.  Opaque to callers: the fields
+ * are owned by tagcache.c so UI code does not depend on search internals. */
+struct tagcache_search_cursor {
+    long position;
+    int entry_count;
+    bool ramsearch;
+    bool valid;
+};
+
 #ifdef __PCTOOL__
 void tagcache_reverse_scan(void);
 /* call this directly instead of tagcache_build in order to not pull
@@ -179,6 +188,10 @@ bool tagcache_search_add_clause(struct tagcache_search *tcs,
 bool tagcache_get_next(struct tagcache_search *tcs, char *buf, long size);
 bool tagcache_retrieve(struct tagcache_search *tcs, int idxid, 
                        int tag, char *buf, long size);
+bool tagcache_search_save_cursor(const struct tagcache_search *tcs,
+                                 struct tagcache_search_cursor *cursor);
+bool tagcache_search_restore_cursor(struct tagcache_search *tcs,
+                                    const struct tagcache_search_cursor *cursor);
 void tagcache_search_finish(struct tagcache_search *tcs);
 long tagcache_get_numeric(const struct tagcache_search *tcs, int tag);
 long tagcache_increase_serial(void);
@@ -199,9 +212,9 @@ void tagcache_screensync_enable(bool state);
 
 #ifdef HAVE_TC_RAMCACHE
 bool tagcache_is_in_ram(void);
-#ifdef HAVE_DIRCACHE
+/* Available for both dircache and filename-index builds; the implementation
+ * chooses the backing store at compile time. */
 bool tagcache_fill_tags(struct mp3entry *id3, const char *filename);
-#endif
 void tagcache_unload_ramcache(void);
 #endif
 void tagcache_commit_finalize(void);

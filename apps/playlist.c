@@ -3031,22 +3031,29 @@ const char* playlist_peek(int steps, char* buf, size_t buf_size)
 
     temp_ptr = buf;
 
-    /* remove bogus dirs from beginning of path
-       (workaround for buggy playlist creation tools) */
-    while (temp_ptr)
+    /* Tracks inserted from the browser/database are already built from an
+     * absolute path and need no existence probing here; open() is the
+     * authoritative check when playback loads them.  Only external playlists
+     * need the malformed-path ("bogus leading dirs") workaround below. */
+    if (playlist->filename[0] != '\0')
     {
-        if (file_exists(temp_ptr))
-            break;
+        /* remove bogus dirs from beginning of path
+           (workaround for buggy playlist creation tools) */
+        while (temp_ptr)
+        {
+            if (file_exists(temp_ptr))
+                break;
 
-        temp_ptr = strchr(temp_ptr+1, '/');
-    }
+            temp_ptr = strchr(temp_ptr+1, '/');
+        }
 
-    if (!temp_ptr)
-    {
-        /* Even though this is an invalid file, we still need to pass a
-           file name to the caller because NULL is used to indicate end
-           of playlist */
-        return buf;
+        if (!temp_ptr)
+        {
+            /* Even though this is an invalid file, we still need to pass a
+               file name to the caller because NULL is used to indicate end
+               of playlist */
+            return buf;
+        }
     }
 
     return temp_ptr;

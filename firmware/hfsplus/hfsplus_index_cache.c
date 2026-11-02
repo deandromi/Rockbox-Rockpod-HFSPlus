@@ -9,6 +9,8 @@
 #include "hfsplus_ro.h"
 #include <string.h>
 
+#ifndef BOOTLOADER
+
 static uint32_t cache_le32(const uint8_t *p)
 {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
@@ -56,3 +58,5 @@ int hfs_index_cache_save(struct hfs_state *s)
     return overlay_container_write(s, (uint64_t)o->cache_start * HFS_OVL_BLOCK,
                                    s->index_cache, used);
 }
+
+#endif /* !BOOTLOADER */

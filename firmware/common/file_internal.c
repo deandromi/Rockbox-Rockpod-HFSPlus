@@ -63,6 +63,7 @@ void file_cache_init(struct filestr_cache *cachep)
     cachep->buffer = NULL;
     cachep->sector = INVALID_SECNUM;
     cachep->flags  = 0;
+    cachep->nsectors = 0;
 }
 
 /* discard and mark the cache buffer as unused */
@@ -70,6 +71,7 @@ void file_cache_reset(struct filestr_cache *cachep)
 {
     cachep->sector = INVALID_SECNUM;
     cachep->flags  = 0;
+    cachep->nsectors = 0;
 }
 
 /* allocate resources attached to the cache */
@@ -143,6 +145,7 @@ void filestr_copy_cache(struct filestr_base *stream,
     stream->cachep = &stream->cache;
     stream->cache.sector = cachep->sector;
     stream->cache.flags  = cachep->flags;
+    stream->cache.nsectors = cachep->nsectors;
 
     if (cachep->buffer)
     {
@@ -455,15 +458,27 @@ static NO_INLINE int open_path_component(struct pathwalk *walkp,
     file_cache_reset(stream->cachep);
     stream->infop = &parentp->info;
     fat_filestr_init(&stream->fatstr, &parentp->info.fatfile);
-    rewinddir_internal(&compp->info);
 
-    while ((rc = readdir_internal(stream, &compp->info, &dir_fatent)) > 0)
+#ifdef HAVE_HFSPLUS_RO
+    if (fat_is_readonly(&parentp->info.fatfile))
     {
-        if (rc > 1 && !(callflags & FF_NOISO))
-            iso_decode_d_name(dir_fatent.name);
+        /* HFS+ has no dircache; the adapter owns a bounded name cache and
+         * keeps the readdir walk as the canonical fallback. */
+        rc = hfsplus_find(&stream->fatstr, compname, &dir_fatent);
+    }
+    else
+#endif
+    {
+        rewinddir_internal(&compp->info);
 
-        if (!strcasecmp(compname, dir_fatent.name))
-            break;
+        while ((rc = readdir_internal(stream, &compp->info, &dir_fatent)) > 0)
+        {
+            if (rc > 1 && !(callflags & FF_NOISO))
+                iso_decode_d_name(dir_fatent.name);
+
+            if (!strcasecmp(compname, dir_fatent.name))
+                break;
+        }
     }
 
     if (rc == 0)

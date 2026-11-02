@@ -407,7 +407,14 @@ static long lookup_buffer_depth;
 static struct tempbuf_searchidx **lookup;
 
 /* Used when building the temporary file. */
-static int cachefd = -1, filenametag_fd;
+static int cachefd = -1, filenametag_fd = -1;
+/* Resume position for the persistent filename tag fd.  Keeping the fd and
+ * position across calls turns the common sequential playlist/runtimedb
+ * lookups into a single forward scan instead of reopening and rescanning the
+ * filename index from the start every time. */
+static long filenametag_pos = -1;
+/* find_entry_disk() can be reached from the UI and the tagcache thread. */
+static struct mutex filenametag_mutex;
 static int total_entry_count = 0;
 static int data_size = 0;
 static int processed_dir_count;
@@ -417,6 +424,7 @@ static volatile int write_lock;
 static volatile int read_lock;
 
 static bool delete_entry(long idx_id);
+static void close_filenametag_fd(void);
 
 static inline void str_setlen(char *buf, size_t len)
 {
@@ -683,6 +691,33 @@ static int open_master_fd(struct master_header *hdr, bool write)
     return fd;
 }
 
+/* Close the persistent filename search fd.  Called when the database is
+ * rebuilt/replaced, imported or shut down so no lookup can use a stale file.
+ * Kept outside the !PLUGIN block because the plugin's remove/thread paths
+ * also drop the descriptor. */
+static void close_filenametag_fd(void)
+{
+#ifdef PLUGIN
+    /* The plugin build has no persistent lookup path, so the mutex is not
+     * initialized there and the fd is always -1. */
+    if (filenametag_fd >= 0)
+        close(filenametag_fd);
+    filenametag_fd = -1;
+    filenametag_pos = -1;
+#else
+    mutex_lock(&filenametag_mutex);
+
+    if (filenametag_fd >= 0)
+    {
+        close(filenametag_fd);
+        filenametag_fd = -1;
+    }
+    filenametag_pos = -1;
+
+    mutex_unlock(&filenametag_mutex);
+#endif
+}
+
 static void remove_files(void)
 {
     int i;
@@ -693,6 +728,8 @@ static void remove_files(void)
     tc_stat.ready = false;
     tc_stat.ramcache = false;
     tc_stat.econ = false;
+    /* Drop any open filename index before unlinking it. */
+    close_filenametag_fd();
     remove_db_file(TAGCACHE_FILE_MASTER);
     for (i = 0; i < TAG_COUNT; i++)
     {
@@ -882,10 +919,14 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
 {
     struct tagfile_entry tfe;
     struct tagcache_header tch;
-    static long last_pos = -1;
+    /* A localfd lookup owns its fd and therefore its position.  The shared
+     * position belongs to the persistent fd only. */
+    long local_pos = -1;
+    long *last_pos = localfd ? &local_pos : &filenametag_pos;
     long pos_history[POS_HISTORY_COUNT];
     unsigned int pos_history_idx = 0;
     unsigned int i;
+    int retries = 0;
 
     char buf[TAGCACHE_BUFSZ];
     const long bufsz = sizeof(buf);
@@ -907,18 +948,26 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
     if (!tc_stat.ready)
         return -2;
 
+    mutex_lock(&filenametag_mutex);
+
     fd = filenametag_fd;
     if (fd < 0 || localfd)
     {
-        last_pos = -1;
+        *last_pos = -1;
         if ( (fd = open_tag_fd(&tch, tag_filename, false)) < 0)
+        {
+            mutex_unlock(&filenametag_mutex);
             return -1;
+        }
+
+        if (!localfd)
+            filenametag_fd = fd;
     }
 
     check_again:
 
-    if (last_pos > 0) /* pos gets cached to prevent reading from beginning */
-        pos = lseek(fd, last_pos, SEEK_SET);
+    if (*last_pos > 0) /* pos gets cached to prevent reading from beginning */
+        pos = lseek(fd, *last_pos, SEEK_SET);
     else /* start back at beginning */
         pos = lseek(fd, sizeof(struct tagcache_header), SEEK_SET);
 
@@ -948,13 +997,16 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
                         logf("read error #2");
                         close(fd);
                         if (!localfd)
+                        {
                             filenametag_fd = -1;
-                        last_pos = -1;
+                            filenametag_pos = -1;
+                        }
+                        mutex_unlock(&filenametag_mutex);
                         return -3;
                     }
                     if (!strncmp(filename, buf, tag_length))
                     {
-                        last_pos = pos_history[pos_history_idx];
+                        *last_pos = pos_history[pos_history_idx];
                         found = true;
                         idx = tfe.idx_id;
                         break ;
@@ -969,12 +1021,15 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
             pos_history_idx++;
     }
 
-    /* Not found? */
+    /* Not found?  With a resume position there is one bounded wrap-around
+     * retry from the beginning; local lookups already started there. */
     if (!found)
     {
-        if (last_pos > 0) /* start back at the beginning */
+        if (*last_pos > 0 && retries == 0)
         {
-            last_pos = -1;
+            retries++;
+            *last_pos = -1;
+            pos_history_idx = 0;
             logf("seek again");
             goto check_again;
         }
@@ -984,6 +1039,8 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
 
     if (fd != filenametag_fd || localfd)
         close(fd);
+
+    mutex_unlock(&filenametag_mutex);
 
     return idx;
 }
@@ -997,7 +1054,7 @@ static int find_index(const char *filename)
 #endif
 
     if (idx_id < 0)
-        idx_id = find_entry_disk(filename, true);
+        idx_id = find_entry_disk(filename, false);
 
     return idx_id;
 }
@@ -2099,6 +2156,37 @@ bool tagcache_retrieve(struct tagcache_search *tcs, int idxid,
     return retrieve(tcs, IF_DIRCACHE(idxid,) &idx, tag, buf, size);
 }
 
+bool tagcache_search_save_cursor(const struct tagcache_search *tcs,
+                                 struct tagcache_search_cursor *cursor)
+{
+    if (!tcs || !cursor || !tcs->valid)
+        return false;
+
+    cursor->position = tcs->position;
+    cursor->entry_count = tcs->entry_count;
+    cursor->ramsearch = tcs->ramsearch;
+    cursor->valid = true;
+    return true;
+}
+
+bool tagcache_search_restore_cursor(struct tagcache_search *tcs,
+                                    const struct tagcache_search_cursor *cursor)
+{
+    if (!tcs || !cursor || !tcs->valid || !cursor->valid)
+        return false;
+
+    /* The cursor belongs to one tag stream and one backing store.  A rebuilt
+     * or shrunk cache is rejected rather than seeking past the new data. */
+    if (cursor->ramsearch != tcs->ramsearch ||
+        cursor->entry_count > tcs->entry_count ||
+        cursor->position < (long)sizeof(struct tagcache_header))
+        return false;
+
+    tcs->position = cursor->position;
+    tcs->entry_count = cursor->entry_count;
+    return true;
+}
+
 void tagcache_search_finish(struct tagcache_search *tcs)
 {
     int i;
@@ -2156,7 +2244,10 @@ bool tagcache_fill_tags(struct mp3entry *id3, const char *filename)
     /* Find the corresponding entry in tagcache. */
 
     if (filename != NULL)
+    {
         memset(id3, 0, sizeof(struct mp3entry));
+        strmemccpy(id3->path, filename, sizeof(id3->path));
+    }
     else /* Note: caller clears id3 prior to call */
         filename = id3->path;
 
@@ -2221,7 +2312,94 @@ bool tagcache_fill_tags(struct mp3entry *id3, const char *filename)
 
     return true;
 }
-#endif /* defined(HAVE_TC_RAMCACHE) && defined(HAVE_DIRCACHE) */
+#undef SET
+#elif defined(HAVE_TC_RAMCACHE)
+/* HFS+ builds have no dircache fileref table, but can still resolve a track
+ * through the filename index and read tags with the normal search API.  This
+ * is only enabled when the tagcache is loaded in RAM: with the RAM cache off
+ * the caller's metadata parser is cheaper than walking the tag files. */
+bool tagcache_fill_tags(struct mp3entry *id3, const char *filename)
+{
+    struct tagcache_search tcs;
+    char *buf;
+    ssize_t remaining;
+    int idx_id;
+
+    if (!tc_stat.ready || !tc_stat.ramcache)
+        return false;
+
+    if (filename != NULL)
+    {
+        memset(id3, 0, sizeof(struct mp3entry));
+        strmemccpy(id3->path, filename, sizeof(id3->path));
+    }
+    else /* Note: caller clears id3 prior to call */
+        filename = id3->path;
+
+    if (filename == NULL || filename[0] == '\0')
+        return false;
+
+    if (!tagcache_find_index(&tcs, filename))
+        return false;
+
+    idx_id = tcs.idx_id;
+    buf = id3->id3v2buf;
+    remaining = sizeof(id3->id3v2buf);
+
+    /* this macro sets id3 strings by copying to the id3v2buf */
+#define SET(x, y) do                                                           \
+    {                                                                          \
+        x = NULL; /* initialize with null if tag doesn't exist */              \
+        if (remaining > 1 &&                                                   \
+            tagcache_retrieve(&tcs, idx_id, y, buf, remaining))                \
+        {                                                                      \
+            if (buf[0] != '\0' && strcmp(buf, UNTAGGED) != 0)                  \
+            {                                                                  \
+                x = buf;                                                       \
+                size_t len = strlen(buf) + 1;                                  \
+                buf += len; remaining -= len;                                  \
+            }                                                                  \
+        }                                                                      \
+    } while(0)
+
+    SET(id3->title,         tag_title);
+    SET(id3->artist,        tag_artist);
+    SET(id3->album,         tag_album);
+    SET(id3->genre_string,  tag_genre);
+    SET(id3->composer,      tag_composer);
+    SET(id3->comment,       tag_comment);
+    SET(id3->albumartist,   tag_albumartist);
+    SET(id3->grouping,      tag_grouping);
+
+    id3->length     = tagcache_get_numeric(&tcs, tag_length);
+    id3->playcount  = tagcache_get_numeric(&tcs, tag_playcount);
+    id3->rating     = tagcache_get_numeric(&tcs, tag_rating);
+    id3->lastplayed = tagcache_get_numeric(&tcs, tag_lastplayed);
+    id3->score      = tagcache_get_numeric(&tcs, tag_virt_autoscore) / 10;
+    id3->year       = tagcache_get_numeric(&tcs, tag_year);
+
+    id3->discnum = tagcache_get_numeric(&tcs, tag_discnumber);
+    id3->tracknum = tagcache_get_numeric(&tcs, tag_tracknumber);
+    id3->bitrate = tagcache_get_numeric(&tcs, tag_bitrate);
+    if (id3->bitrate == 0)
+        id3->bitrate = 1;
+
+    if (global_settings.autoresume_enable)
+    {
+        id3->elapsed = tagcache_get_numeric(&tcs, tag_lastelapsed);
+        logf("tagcache_fill_tags: Set elapsed for %s to %lX\n",
+             id3->title, id3->elapsed);
+
+        id3->offset = tagcache_get_numeric(&tcs, tag_lastoffset);
+        logf("tagcache_fill_tags: Set offset for %s to %lX\n",
+             id3->title, id3->offset);
+    }
+
+    tagcache_search_finish(&tcs);
+    return true;
+}
+#undef SET
+#endif /* HAVE_TC_RAMCACHE */
 
 static inline void write_item(const char *item)
 {
@@ -3399,6 +3577,9 @@ static bool commit(void)
     while (write_lock)
         sleep(1);
 
+    /* The filename index is about to be replaced. */
+    close_filenametag_fd();
+
 #if !defined(PLUGIN)
     int fd = open_db_fd(TAGCACHE_FILE_NOCOMMIT, O_RDONLY);
     if (fd >= 0)
@@ -3980,6 +4161,7 @@ bool tagcache_import_changelog(void)
 
     write_lock++;
 
+    close_filenametag_fd();
     filenametag_fd = open_tag_fd(&tch, tag_filename, false);
 
     fast_readline(clfd, buf, bufsz, (void *)(intptr_t)masterfd,
@@ -3988,11 +4170,7 @@ bool tagcache_import_changelog(void)
     close(clfd);
     close(masterfd);
 
-    if (filenametag_fd >= 0)
-    {
-        close(filenametag_fd);
-        filenametag_fd = -1;
-    }
+    close_filenametag_fd();
 
     write_lock--;
 
@@ -4522,22 +4700,27 @@ static bool load_tagcache(void)
     /* Master header copy should already match, this can be redundant to do. */
     current_tcmh = tcmh;
 
-    /* Load the master index table. */
-    for (int i = 0; i < tcmh.tch.entry_count; i++)
+    /* Load the master index table in IDX_BUF_DEPTH batches.  The ramcache is
+     * pinned for the rest of the scan, so it can be the read destination. */
+    for (int i = 0; i < tcmh.tch.entry_count; )
     {
-        bytesleft -= sizeof(struct index_entry);
+        int count = MIN(tcmh.tch.entry_count - i, IDX_BUF_DEPTH);
+
+        bytesleft -= sizeof(struct index_entry) * count;
         if (bytesleft < 0)
         {
             logf("too big tagcache.");
             goto failure;
         }
 
-        int rc = read_index_entries(fd, &tcramcache.hdr->indices[i], 1);
-        if (rc != sizeof (struct index_entry))
+        int rc = read_index_entries(fd, &tcramcache.hdr->indices[i], count);
+        if (rc != (ssize_t)(sizeof(struct index_entry) * count))
         {
             logf("read error #10");
             goto failure;
         }
+
+        i += count;
     }
 
     close(fd);
@@ -5078,6 +5261,7 @@ void do_tagcache_build(const char *path[])
         return ;
     }
 
+    close_filenametag_fd();
     filenametag_fd = open_tag_fd(&header, tag_filename, false);
 
     cpu_boost(true);
@@ -5174,11 +5358,7 @@ void do_tagcache_build(const char *path[])
     write(cachefd, &header, sizeof(struct tagcache_header));
     close(cachefd);
 
-    if (filenametag_fd >= 0)
-    {
-        close(filenametag_fd);
-        filenametag_fd = -1;
-    }
+    close_filenametag_fd();
 
     if (!ret)
     {
@@ -5390,6 +5570,8 @@ static void tagcache_thread(void)
 
             case SYS_USB_CONNECTED:
                 logf("USB: TagCache");
+                /* The volume will be unmounted for mass storage. */
+                close_filenametag_fd();
                 usb_acknowledge(SYS_USB_CONNECTED_ACK, ev.data);
                 usb_wait_for_disconnect(&tagcache_queue);
                 break ;
@@ -5413,6 +5595,9 @@ void tagcache_shutdown(void)
 {
     /* Flush the command queue. */
     run_command_queue(true);
+
+    /* The filename index may be replaced by a later update. */
+    close_filenametag_fd();
 
 #if defined(HAVE_EEPROM_SETTINGS) && defined(HAVE_TC_RAMCACHE)
     if (tc_stat.ramcache)
@@ -5497,7 +5682,8 @@ void tagcache_init(void)
 {
     memset(&tc_stat, 0, sizeof(struct tagcache_stat));
     memset(&current_tcmh, 0, sizeof(struct master_header));
-    filenametag_fd = -1;
+    mutex_init(&filenametag_mutex);
+    close_filenametag_fd();
     write_lock = read_lock = 0;
 
 #ifndef __PCTOOL__

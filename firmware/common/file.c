@@ -149,10 +149,34 @@ file_error:
     return rc;
 }
 
-static void discard_cache(struct filestr_desc *file)
+/* Read-ahead is deliberately limited to a stream that owns a private,
+ * read-only cache. If a writer is present, fileobj_mgr assigns the shared
+ * single-sector cache to every stream, including readers, and this returns
+ * false. That preserves the existing writable-stream coherence rules. */
+static inline bool readahead_allowed(const struct filestr_desc *file)
 {
-    struct filestr_cache *const cachep = file->stream.cachep;
-    cachep->flags = 0;
+    return !(file->stream.flags & FD_WRITE) &&
+           !(fileobj_get_flags(&file->stream) & FO_DIRECTORY) &&
+           file->stream.cachep == &file->stream.cache;
+}
+
+/* Is 'sector' inside the cache's valid sector range? */
+static inline bool cache_contains(const struct filestr_cache *cachep,
+                                  unsigned long sector)
+{
+    return cachep->sector != INVALID_SECNUM &&
+           sector >= cachep->sector &&
+           sector - cachep->sector < cachep->nsectors;
+}
+
+/* Drop a multi-sector read-ahead window. A single-sector cache is left alone
+ * so a seek keeps the previous behaviour. */
+static inline void readahead_invalidate(struct filestr_base *stream)
+{
+    struct filestr_cache *const cachep = stream->cachep;
+
+    if (cachep->nsectors > 1 && !(cachep->flags & FSC_DIRTY))
+        filestr_discard_cache(stream);
 }
 
 /* set the file pointer */
@@ -194,6 +218,9 @@ static off_t lseek_internal(struct filestr_desc *file, off_t offset,
 
     file->offset = pos;
 
+    /* The read-ahead window is tied to the old sequential position. */
+    readahead_invalidate(&file->stream);
+
     return pos;
 file_error:
     return rc;
@@ -208,9 +235,13 @@ static void handle_truncate(struct filestr_desc * const file, file_size_t size)
     struct filestr_base *s = NULL;
     while ((s = fileobj_get_next_stream(&file->stream, s)))
     {
-        /* caches with data beyond new extents are invalid */
-        sector_t sector = s->cachep->sector;
-        if (sector != INVALID_SECNUM && sector >= filesectors)
+        /* caches with data beyond new extents are invalid; a read-ahead
+           window may straddle the new end and must be dropped as a whole */
+        struct filestr_cache *const cachep = s->cachep;
+        sector_t sector = cachep->sector;
+        if (sector != INVALID_SECNUM &&
+            (cachep->nsectors == 0 || sector >= filesectors ||
+             filesectors - sector < cachep->nsectors))
             filestr_discard_cache(s);
 
         /* files outside bounds must be rewound */
@@ -249,7 +280,7 @@ static int ftruncate_internal(struct filestr_desc *file, file_size_t size,
             if (rc2 == FAT_RC_ENOSPC)
             {
                 /* no space left on device; further truncation needed */
-                discard_cache(file);
+                filestr_discard_cache(&file->stream);
                 truncsize = ALIGN_DOWN(truncsize - 1, sector_size);
                 sector--;
                 rc = rc2;
@@ -308,7 +339,7 @@ static int fsync_internal(struct filestr_desc *file)
         if (rc2 == FAT_RC_ENOSPC && (cachep->flags & FSC_NEW))
         {
             /* no space left on device so this must be dropped */
-            discard_cache(file);
+            filestr_discard_cache(&file->stream);
             size = ALIGN_DOWN(size - 1, sector_size);
             foflags |= FO_TRUNC;
             rc = rc2;
@@ -546,14 +577,24 @@ static int open_internal_locked(const char *path, int oflag,
     return rc;
 }
 
-/* fill a cache buffer with a new sector */
+/* Maximum bytes of read-ahead a single cache miss may fetch. The cache
+ * buffer is DC_CACHE_BUFSIZE bytes; this cap keeps the experiment at 4 KiB
+ * even if a future target has a larger disk-cache buffer. Define it to 0 to
+ * disable read-ahead without touching the cache path. */
+#ifndef FILESTR_READAHEAD_BYTES
+#define FILESTR_READAHEAD_BYTES 4096
+#endif
+
+/* fill a cache buffer with a new sector or read-ahead window */
 static int readwrite_fill_cache(struct filestr_desc *file, unsigned long sector,
-                                unsigned long filesectors, bool write)
+                                unsigned long filesectors,
+                                uint16_t sector_size, bool write)
 {
-    /* sector != cachep->sector should have been checked by now */
+    /* sector should not have been present in the cache */
 
     int rc;
     struct filestr_cache *cachep = filestr_get_cache(&file->stream);
+    unsigned long nsectors = 1;
 
     if (cachep->flags & FSC_DIRTY)
     {
@@ -572,19 +613,54 @@ static int readwrite_fill_cache(struct filestr_desc *file, unsigned long sector,
 
     if (!write || sector < filesectors)
     {
+        if (!write && readahead_allowed(file))
+        {
+            /* Windows are private to a writer-free, read-only stream and
+             * never extend past EOF or the cache buffer. */
+            unsigned int maxsectors =
+                MIN((unsigned int)DC_CACHE_BUFSIZE,
+                    (unsigned int)FILESTR_READAHEAD_BYTES) / sector_size;
+
+            if (maxsectors > 1 && sector < filesectors)
+            {
+                nsectors = filesectors - sector;
+                if (nsectors > maxsectors)
+                    nsectors = maxsectors;
+            }
+        }
+
         /* only reading or this sector would have been flushed if the cache
-           was previously needed for a different sector */
-        rc = fat_readwrite(&file->stream.fatstr, 1, cachep->buffer, false);
+           was previously needed for a different sector. A short return is
+           expected at EOF; only the sectors actually read become valid. */
+        rc = fat_readwrite(&file->stream.fatstr, nsectors, cachep->buffer,
+                           false);
         if (rc < 0)
             FILE_ERROR(rc == FAT_RC_ENOSPC ? ENOSPC : EIO, rc * 10 - 3);
+
+        if (rc == 0)
+        {
+            /* The cached file size said the sector existed but the filesystem
+             * returned nothing. Do not expose an uninitialized buffer. */
+            cachep->sector = INVALID_SECNUM;
+            cachep->flags = 0;
+            cachep->nsectors = 0;
+            if (write)
+                FILE_ERROR(EIO, -4);
+            return 0; /* read EOF */
+        }
+
+        nsectors = rc;
+        cachep->flags = 0; /* raw sectors are clean */
     }
     else
     {
         /* create a fresh, shiny, new sector with that new sector smell */
         cachep->flags = FSC_NEW;
+        nsectors = 1;
     }
 
     cachep->sector = sector;
+    cachep->nsectors = (uint16_t)nsectors;
     return 1;
 file_error:
     DEBUGF("Failed caching sector: %d\n", rc);
@@ -593,10 +669,10 @@ file_error:
 
 /* read or write to part or all of the cache buffer */
 static inline void readwrite_cache(struct filestr_cache *cachep, void *buf,
-                                   unsigned long secoffset, size_t nbyte,
+                                   unsigned long bufoffset, size_t nbyte,
                                    bool write)
 {
-    void *dst, *cbufp = cachep->buffer + secoffset;
+    void *dst, *cbufp = cachep->buffer + bufoffset;
 
     if (write)
     {
@@ -620,17 +696,23 @@ static inline ssize_t readwrite_partial(struct filestr_desc *file,
                                         void *buf,
                                         size_t nbyte,
                                         unsigned long filesectors,
+                                        uint16_t sector_size,
                                         unsigned int flags)
 {
-    if (sector != cachep->sector)
+    if (!cache_contains(cachep, sector))
     {
         /* wrong sector in buffer */
-        int rc = readwrite_fill_cache(file, sector, filesectors, flags);
+        int rc = readwrite_fill_cache(file, sector, filesectors, sector_size,
+                                      flags);
         if (rc <= 0)
             return rc;
     }
 
-    readwrite_cache(cachep, buf, secoffset, nbyte, flags);
+    unsigned long bufoffset = secoffset;
+    if (sector != cachep->sector)
+        bufoffset += (unsigned long)(sector - cachep->sector) * sector_size;
+
+    readwrite_cache(cachep, buf, bufoffset, nbyte, flags);
     return nbyte;
 }
 
@@ -684,12 +766,19 @@ static ssize_t readwrite(struct filestr_desc *file, void *buf, size_t nbyte,
     unsigned long sector = file->offset / sector_size;
     unsigned long sectoroffs = file->offset % sector_size;
 
+    if (write && cachep->nsectors > 1)
+    {
+        /* A read-ahead window is read-only. Drop it before a write so the
+           shared-cache coherence rules remain single-sector. */
+        filestr_discard_cache(&file->stream);
+    }
+
     /* any head bytes? */
     if (sectoroffs)
     {
         size_t headbytes = MIN(nbyte, sector_size - sectoroffs);
         rc = readwrite_partial(file, cachep, sector, sectoroffs, buf, headbytes,
-                               filesectors, write);
+                               filesectors, sector_size, write);
         if (rc <= 0)
         {
             if (rc < 0)
@@ -710,6 +799,25 @@ static ssize_t readwrite(struct filestr_desc *file, void *buf, size_t nbyte,
 
     while (sectorcount)
     {
+        /* Serve from a valid cache window first. A multi-sector window is only
+           ever created for a writer-free read-only stream, so this cannot
+           bypass a dirty sector that needs writeback. */
+        if (UNLIKELY(!write && cache_contains(cachep, sector)))
+        {
+            unsigned long coff = sector - cachep->sector;
+            unsigned long runlen = MIN((unsigned long)cachep->nsectors - coff,
+                                       sectorcount);
+
+            memcpy(buf, cachep->buffer + coff * sector_size,
+                   runlen * sector_size);
+            rc = 1; /* cache-served data is still a successful transfer */
+            buf += runlen * sector_size;
+            nbyte -= runlen * sector_size;
+            sector += runlen;
+            sectorcount -= runlen;
+            continue;
+        }
+
         unsigned long runlen = sectorcount;
 
         /* if a cached sector is inside the transfer range, split the transfer
@@ -776,6 +884,7 @@ static ssize_t readwrite(struct filestr_desc *file, void *buf, size_t nbyte,
         {
             /* do this one sector with the cache */
             readwrite_cache(cachep, buf, 0, sector_size, write);
+            rc = 1; /* cache-served data is still a successful transfer */
             buf += sector_size;
             nbyte -= sector_size;
             sector++;
@@ -788,7 +897,7 @@ static ssize_t readwrite(struct filestr_desc *file, void *buf, size_t nbyte,
     {
         /* tail bytes always start at sector offset 0 */
         rc = readwrite_partial(file, cachep, sector, 0, buf, nbyte,
-                               filesectors, write);
+                               filesectors, sector_size, write);
         if (rc < 0)
             FILE_ERROR(ERRNO, rc * 10 - 7);
 

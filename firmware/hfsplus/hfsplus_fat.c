@@ -59,6 +59,8 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
         return HFS_RO_ARGUMENT;
     struct hfs_state *s = &hfs_states[IF_MV_VOL(filestr->fatfilep->volume)];
     mutex_lock(&s->mutex);
+    hfs_diag_op(s, HFSPLUS_OP_CLOSE);
+    hfs_diag_begin(s, HFSPLUS_OP_CLOSE);
     int rc = HFS_RO_OK;
     struct fat_file *file = filestr->fatfilep;
     if (file->hfs_overlay) {
@@ -70,6 +72,10 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
             goto out;
         }
         struct hfs_overlay_entry *e = &s->overlay.entries[idx];
+        if (hfs_settings_name(e->name)) {
+            hfs_diag_op(s, HFSPLUS_OP_SETTINGS);
+            hfs_diag_begin(s, HFSPLUS_OP_SETTINGS);
+        }
         if ((e->flags & HFS_OVL_BASE) && size > e->size) {
             rc = overlay_materialize_base(s, e, &file->hfs_data);
             if (rc)
@@ -117,6 +123,7 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
         }
     }
 out:
+    hfs_diag_end(s);
     mutex_unlock(&s->mutex);
     return hfs_file_rc(rc);
 }
@@ -222,6 +229,9 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
     uint64_t offset = (uint64_t)stream->lastsector * s->io.sector_size;
 
     mutex_lock(&s->mutex);
+    if (write)
+        hfs_diag_op(s, HFSPLUS_OP_WRITE);
+    hfs_diag_begin(s, write ? HFSPLUS_OP_WRITE : -1);
     int rc = HFS_RO_OK;
     size_t got = 0;
 
@@ -240,6 +250,10 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
         if (!oe) {
             rc = HFS_RO_FORMAT;
             goto out;
+        }
+        if (write && hfs_settings_name(oe->name)) {
+            hfs_diag_op(s, HFSPLUS_OP_SETTINGS);
+            hfs_diag_begin(s, HFSPLUS_OP_SETTINGS);
         }
         if (write) {
             if (oe->flags & HFS_OVL_BASE) {
@@ -332,6 +346,7 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
 success:
     rc = HFS_RO_OK;
 out:
+    hfs_diag_end(s);
     mutex_unlock(&s->mutex);
     if (rc)
         return hfs_file_rc(rc);

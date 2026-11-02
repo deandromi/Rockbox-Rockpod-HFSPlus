@@ -2,10 +2,12 @@
 #ifndef ROCKPOD_HFSPLUS_FAT_H
 #define ROCKPOD_HFSPLUS_FAT_H
 
+#include "hfsplus_rb.h"
 #include "hfsplus_state.h"
 #include "hfsplus_time.h"
 #include "fs_attr.h"
 #include "string-extra.h"
+#include <string.h>
 
 /* Adapter-boundary helpers shared by namespace and FAT entry points.  They are
  * header-inline so neither module depends on the other's implementation. */
@@ -16,6 +18,65 @@ static inline int hfs_file_rc(int rc)
 {
     return rc == HFS_RO_BUFFER ? FAT_RC_ENOSPC : rc;
 }
+
+/* Per-operation diagnostics.  Counters are append-only and indexed by
+ * enum hfsplus_op; an out-of-range op is ignored rather than corrupting the
+ * neighbouring diagnostic fields.  The caller holds s->mutex. */
+#ifdef BOOTLOADER
+static inline void hfs_diag_op(struct hfs_state *s, int op)
+{
+    (void)s;
+    (void)op;
+}
+
+static inline void hfs_diag_begin(struct hfs_state *s, int op)
+{
+    (void)s;
+    (void)op;
+}
+
+static inline void hfs_diag_end(struct hfs_state *s)
+{
+    (void)s;
+}
+#else
+static inline void hfs_diag_op(struct hfs_state *s, int op)
+{
+    if (op >= 0 && (unsigned int)op < HFSPLUS_OP_COUNT)
+        ++s->diag.op_count[op];
+}
+
+/* Attribute flushes performed while this operation holds s->mutex.  The
+ * caller must pair begin/end on every exit path. */
+static inline void hfs_diag_begin(struct hfs_state *s, int op)
+{
+    s->diag.op_active = op;
+}
+
+static inline void hfs_diag_end(struct hfs_state *s)
+{
+    s->diag.op_active = -1;
+}
+#endif
+
+/* Settings are written through config.cfg (+ .new/.old promotion) and the
+ * legacy rockbox.cfg name.  This is a basename match at the adapter layer;
+ * fixed.cfg is read-only and is not counted. */
+#ifdef BOOTLOADER
+static inline bool hfs_settings_name(const char *name)
+{
+    (void)name;
+    return false;
+}
+#else
+static inline bool hfs_settings_name(const char *name)
+{
+    return name && (!strcmp(name, "config.cfg") ||
+                    !strcmp(name, "config.cfg.new") ||
+                    !strcmp(name, "config.cfg.old") ||
+                    !strcmp(name, "rockbox.cfg"));
+}
+#endif
 
 static inline bool hfs_valid_volume(int volume)
 {

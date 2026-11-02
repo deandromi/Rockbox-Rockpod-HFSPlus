@@ -92,7 +92,27 @@ int hfsplus_open_root(int volume, struct fat_file *file);
 int hfsplus_open(const struct fat_file *parent, long id, struct fat_file *file);
 int hfsplus_readdir(struct fat_filestr *stream, struct fat_dirscan_info *scan,
                     struct fat_direntry *entry);
+/* Name lookup hook for the generic path walk.  Returns 1 if found, 0 if not
+ * found, or a negative HFS+ error. */
+int hfsplus_find(struct fat_filestr *stream, const char *name,
+                 struct fat_direntry *entry);
 long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
                        void *buffer, bool write);
 int hfsplus_seek(struct fat_filestr *stream, unsigned long sector);
+
+/* Append-only per-operation diagnostics.  These count adapter calls, not
+ * sectors; the total ATA flush counter remains hfsplus_io_flushes(). */
+enum hfsplus_op {
+    HFSPLUS_OP_CREATE = 0,
+    HFSPLUS_OP_WRITE,
+    HFSPLUS_OP_CLOSE,
+    HFSPLUS_OP_RENAME,
+    HFSPLUS_OP_REMOVE,
+    HFSPLUS_OP_SETTINGS,
+    HFSPLUS_OP_COUNT
+};
+unsigned int hfsplus_io_op_count(int volume, int op);
+unsigned int hfsplus_io_op_flushes(int volume, int op);
+/* v3 entry-table high-water mark; 0 for a non-v3 or unmounted overlay. */
+unsigned int hfsplus_overlay_high_water(int volume);
 #endif
