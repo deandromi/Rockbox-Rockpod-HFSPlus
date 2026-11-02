@@ -8,7 +8,7 @@ Built for the iPod Classic 6G. Compatibility depends on the Classic revision, st
 
 ## Why this exists
 
-FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume.
+FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume. Rockpod HFS+ also exists for huge efficiency upgrades, actual stable firmware and bootloaders, anti-corruption protection and more! If any of these functionalities pose great advantages on your installation, consider starring this repository, it's much appreciated (:
 
 ## Important!
 
