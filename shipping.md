@@ -883,17 +883,21 @@ The source was moved after configure generated the Makefile. Use a fresh build d
 
 The release already contains the development fixes. Old iterative patches are not an installation step. Stop and inspect before applying anything.
 
-### 15.8 Connecting in Rockbox USB mode corrupts data
+### 15.8 Rockbox USB mode is read-only
 
-This is a long-standing stock Rockbox USB mass-storage issue on multiple iPods, not a defect introduced by this HFS+ fork. The device owner reports that connecting while Rockpod is running reliably causes corruption; Apple Disk Mode is the safe path.
+HFS+ firmware builds expose Rockbox USB mass storage as a **write-protected**
+LUN. The host may mount it read-only, copy files off and read
+`/.rockpod-rw` for overlay diagnostics. SCSI WRITE commands return DATA
+PROTECT, and SYNCHRONIZE CACHE flushes the ATA cache at the handoff boundaries.
 
 Operational rules:
 
-- Use Apple Disk Mode for all file transfer, backup and database work.
-- Do not use Rockbox USB mode as a substitute for Disk Mode.
-- Do not conclude that a disk is healthy merely because it mounts in Rockbox USB mode.
-- V2.0 adds the overlay header checksum and block-1 backup (HFS-040) on top of the V1.1 bitmap/entry validation and commit ordering (HFS-001/002).
-- If a device was connected in Rockbox USB mode, cleanly eject it and reboot; if startup reports `-4`, follow §15.1. Do not bypass the consistency checks or delete the overlay.
+- Use Apple Disk Mode for all writes, backups, database builds and repairs.
+- Rockbox USB is safe for reading/copying off and diagnostics only.
+- Do not use bootloader or older firmware USB write mode for transfers.
+- If a device was connected in Rockbox USB mode, cleanly eject it and reboot;
+  if startup reports `-4`, follow §15.1. Do not bypass the consistency checks
+  or delete the overlay.
 
 ---
 

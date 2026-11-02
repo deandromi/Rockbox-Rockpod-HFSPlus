@@ -229,6 +229,7 @@ Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware
 | CNID index | 4,096 entries; fallback scan |
 | Database workflow | Mac host build; on-device rebuild unsupported |
 | Hardware | V2.1.1 confirmed on one Classic 6G; V3.0/v3 cache and iFlash validation pending |
+| USB transfer | HFS+ firmware USB mass storage is read-only; Apple Disk Mode for writes |
 
 ---
 
@@ -289,7 +290,9 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
   10 data-size, 11 data-unallocated, 12 data-overlap, 13 parent, 14 next-id.
 - `-4`: native HFS+ dirty/inconsistent/journal replay required.
 - `diskutil verifyVolume` checks native HFS+ only, not overlay internals.
-- Do not use Rockbox USB mode for transfers; use Apple Disk Mode.
+- Rockbox USB mass storage is read-only on HFS+ firmware builds. Host writes
+  return SCSI DATA PROTECT; use Apple Disk Mode for changes. The read-only LUN
+  is safe for copying files off and reading `/.rockpod-rw` for diagnostics.
 
 ---
 

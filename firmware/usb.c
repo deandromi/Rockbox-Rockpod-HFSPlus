@@ -105,6 +105,14 @@ static uint32_t usb_broadcast_seqnum = 0x80000000;
 #ifdef HAVE_USB_POWER
 static int usb_mode = USBMODE_DEFAULT;
 static bool usb_power_only = false;
+
+static inline void usb_storage_flush(void)
+{
+#ifdef HAVE_STORAGE_FLUSH
+    if (storage_flush())
+        logf("usb: storage flush failed");
+#endif
+}
 #endif
 
 #if defined(USB_FIREWIRE_HANDLING)
@@ -266,6 +274,7 @@ static inline void usb_slave_mode(bool on)
         thread_set_priority(thread_self(), PRIORITY_REALTIME);
 #endif
         disk_unmount_all();
+        usb_storage_flush();
     }
     else
     {
@@ -273,6 +282,7 @@ static inline void usb_slave_mode(bool on)
         thread_set_priority(thread_self(), PRIORITY_SYSTEM);
 #endif
         /* Entered exclusive mode */
+        usb_storage_flush();
         rc = disk_mount_all();
         if(rc <= 0) /* no partition */
             panicf("mount: %d",rc);
@@ -356,6 +366,7 @@ static inline void usb_slave_mode(bool on)
     {
         DEBUGF("Entering USB slave mode\n");
         disk_unmount_all();
+        usb_storage_flush();
         storage_soft_reset();
         storage_init();
         storage_enable(false);
@@ -373,6 +384,7 @@ static inline void usb_slave_mode(bool on)
 
         usb_enable(false);
 
+        usb_storage_flush();
         rc = storage_init();
         if(rc)
             panicf("storage: %d",rc);

@@ -55,11 +55,12 @@ iFlash storage.
 
 ### 6. Rockbox USB mode safety
 
-Rockbox USB mass storage is known to corrupt data on these iPods.
+HFS+ firmware builds expose Rockbox USB mass storage as a write-protected LUN.
 
-- Confirm Apple Disk Mode remains the only supported transfer path.
-- Test whether a firmware guard can disable or block Rockbox USB mass storage.
-- If a guard is not implemented, add a blocking warning before the volume is exposed.
+- Confirm the host mounts it read-only and can copy files off.
+- Confirm a host write is rejected with DATA PROTECT.
+- Confirm SYNCHRONIZE CACHE and clean disconnect leave the volume clean.
+- Apple Disk Mode remains the only supported path for writes, backups and repairs.
 
 ### 7. Bootloader and DFU recovery
 

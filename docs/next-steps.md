@@ -23,9 +23,10 @@ Priority order:
    - iFlash SD, iFlash CF and original HDD.
    - Record model, adapter, card/SSD, battery health and macOS version.
 3. **Rockbox USB mode guard**
-   - Disable or strongly block mass-storage mode in HFS+ builds.
-   - It is a known corruption path; Apple Disk Mode remains the supported
-     transfer path.
+   - Phase 1 implemented: HFS+ firmware exposes a read-only LUN, rejects host
+     writes with DATA PROTECT, and flushes on SYNCHRONIZE CACHE/handoff.
+   - Apple Disk Mode remains the supported write path.
+   - Phase 2 (write-capable USB with explicit overlay reset) is not implemented.
 4. **Bootloader/DFU recovery**
    - Interrupted DFU install.
    - No Apple firmware partition.
@@ -119,6 +120,24 @@ Do not trade crash consistency for power without the hardware matrix.
   workflow.
 - Unicode normalization/case folding is a documented compatibility limit.
 - Non-inline allocation forks and extents-overflow trees fail closed.
+
+---
+
+## Post-V3.0 efficiency order
+
+1. Measure the V3.0 iFlash baseline: boot time, mount ATA reads/bytes,
+   index-cache HIT/MISS, flushes per create/write/close/rename/delete/settings,
+   idle/playback power.
+2. Chunk v3 high-water updates (reserve 64 slots, grow in 32/64-slot steps) to
+   remove per-create header flushes.
+3. Build and test a v2→v3 overlay migration with backup/rollback.
+4. Measure flushes again; then decide whether a WAL/commit-group is worth the
+   hardware power-loss risk.
+5. Slim the bootloader by excluding unused overlay/FAT hooks.
+6. CPU/read-side cleanups only if profiles justify: two-pass duplicate-name
+   resolution, compact CNID cache, readdir hidden-name cache, BSS/double-zero.
+7. Tune general power settings after iFlash measurements: backlight,
+   brightness, ATA spindown, CPU scaling.
 
 ---
 
