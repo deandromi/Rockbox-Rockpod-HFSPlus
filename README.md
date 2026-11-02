@@ -12,7 +12,7 @@ FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as o
 
 ## Important!
 
-Please make a decision between picking either: the newer post V2 releases or the V2-Final release. This is important because the writeable overlay used in Rockpod HFS+ is not backwards compatible as of V3. V3 itself poses some strong advantages including power efficiency, better corruption protection and soon the ability to build coverflow-cache and music-database building on the iPod itself instead of on a Mac. V2 is however currently widely tested and is verified to work on most iPods, but if a bug in V2 is found, no matter how important, it will not get fixed. V3 is the recommended option as of November 2nd 2026.
+Please make a decision between picking either: the newer post V2 releases or the V2-Final release. This is important because the writeable overlay used in Rockpod HFS+ is not backwards compatible as of V3. V3 itself poses some strong advantages including power efficiency, better corruption protection and soon the ability to build coverflow-cache and music-database building on the iPod itself instead of on a Mac. V2 is however currently widely tested and is verified to work on most iPods, but if a bug in V2 is found, no matter how important, it will not get fixed. V3 is the recommended option as of November 2nd 2026. Also keep in mind that if you haven't yet formatted your iPod to HFS+ that it will lose all its data anyway, make sure to make backups and transfer existing music and playlists to a different device.
 
 ## Quick facts
 
