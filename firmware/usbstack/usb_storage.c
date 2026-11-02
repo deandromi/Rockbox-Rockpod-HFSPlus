@@ -548,20 +548,34 @@ void usb_storage_transfer_complete(int ep,int dir,int status,int length)
                         cur_cmd.data[cur_cmd.data_select],
                         MIN(WRITE_BUFFER_SIZE/cur_cmd.block_size, cur_cmd.count)*cur_cmd.block_size);
 #else
+                if (USB_STORAGE_READ_ONLY) {
+                    /* Drain every data-out chunk before reporting DATA
+                     * PROTECT.  Sending CSW while the host is still sending
+                     * desynchronizes bulk-only transport. */
+                    cur_sense_data.sense_key = SENSE_DATA_PROTECT;
+                    cur_sense_data.asc = ASC_WRITE_PROTECT;
+                    cur_sense_data.ascq = 0;
+                    cur_cmd.data_select = !cur_cmd.data_select;
+                    cur_cmd.sector = next_sector;
+                    cur_cmd.count = next_count;
+                    if (next_count == 0)
+                        send_csw(UMS_STATUS_FAIL);
+                    break;
+                }
                 int result = USBSTOR_WRITE_SECTORS_FILTER();
-
                 if (result == 0) {
                     result = storage_write_sectors(IF_MD(cur_cmd.lun,)
                         cur_cmd.sector,
-                        MIN(WRITE_BUFFER_SIZE/cur_cmd.block_size, cur_cmd.count),
+                        MIN(WRITE_BUFFER_SIZE/cur_cmd.block_size,
+                            cur_cmd.count),
                         cur_cmd.data[cur_cmd.data_select]);
                 }
 
                 if(result != 0) {
                     send_csw(UMS_STATUS_FAIL);
-                    cur_sense_data.sense_key=SENSE_MEDIUM_ERROR;
-                    cur_sense_data.asc=ASC_WRITE_ERROR;
-                    cur_sense_data.ascq=0;
+                    cur_sense_data.sense_key = SENSE_MEDIUM_ERROR;
+                    cur_sense_data.asc = ASC_WRITE_ERROR;
+                    cur_sense_data.ascq = 0;
                     break;
                 }
 #endif
@@ -1269,13 +1283,6 @@ static void handle_scsi(struct command_block_wrapper* cbw)
                 cur_sense_data.ascq=0;
                 break;
             }
-            if(USB_STORAGE_READ_ONLY) {
-                send_csw(UMS_STATUS_FAIL);
-                cur_sense_data.sense_key=SENSE_DATA_PROTECT;
-                cur_sense_data.asc=ASC_WRITE_PROTECT;
-                cur_sense_data.ascq=0;
-                break;
-            }
             cur_cmd.data[0] = tb.transfer_buffer;
             cur_cmd.data[1] = &tb.transfer_buffer[WRITE_BUFFER_SIZE];
             cur_cmd.data_select=0;
@@ -1308,13 +1315,6 @@ static void handle_scsi(struct command_block_wrapper* cbw)
                 send_csw(UMS_STATUS_FAIL);
                 cur_sense_data.sense_key=SENSE_NOT_READY;
                 cur_sense_data.asc=ASC_MEDIUM_NOT_PRESENT;
-                cur_sense_data.ascq=0;
-                break;
-            }
-            if(USB_STORAGE_READ_ONLY) {
-                send_csw(UMS_STATUS_FAIL);
-                cur_sense_data.sense_key=SENSE_DATA_PROTECT;
-                cur_sense_data.asc=ASC_WRITE_PROTECT;
                 cur_sense_data.ascq=0;
                 break;
             }

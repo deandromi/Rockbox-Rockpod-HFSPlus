@@ -23,8 +23,9 @@ Priority order:
    - iFlash SD, iFlash CF and original HDD.
    - Record model, adapter, card/SSD, battery health and macOS version.
 3. **Rockbox USB mode guard**
-   - Phase 1 implemented: HFS+ firmware exposes a read-only LUN, rejects host
-     writes with DATA PROTECT, and flushes on SYNCHRONIZE CACHE/handoff.
+   - Phase 1 implemented: HFS+ firmware exposes a read-only LUN, drains the
+     host data-out phase before returning DATA PROTECT, and flushes on
+     SYNCHRONIZE CACHE/handoff.
    - Apple Disk Mode remains the supported write path.
    - Phase 2 (write-capable USB with explicit overlay reset) is not implemented.
 4. **Bootloader/DFU recovery**
