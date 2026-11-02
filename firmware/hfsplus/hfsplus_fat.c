@@ -303,6 +303,7 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
             if (oe->flags & HFS_OVL_BASE) {
                 struct hfs_ro_entry base;
                 memset(&base, 0, sizeof(base));
+                base.id = (uint32_t)file->hfs_backing_id;
                 base.kind = 2;
                 base.data = file->hfs_data;
                 size_t done = 0;
@@ -320,6 +321,7 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
     } else {
         struct hfs_ro_entry e;
         memset(&e, 0, sizeof(e));
+        e.id = (uint32_t)file->firstcluster;
         e.kind = file->hfs_kind;
         e.data = file->hfs_data;
         if (write) {

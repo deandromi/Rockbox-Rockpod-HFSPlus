@@ -78,7 +78,10 @@ static int parse_fork(struct hfs_ro_volume *v, const uint8_t *p,
         }
         sum += e->count;
     }
-    if (sum > fork->blocks || (ended && sum != fork->blocks))
+    /* sum < blocks is valid for a data fork whose remaining extents live in
+     * the extents-overflow tree.  The extents file itself must stay inline;
+     * that is checked when the overflow reader is used. */
+    if (sum > fork->blocks)
         return HFS_RO_FORMAT;
     return HFS_RO_OK;
 }
@@ -819,11 +822,8 @@ static int parse_record(struct hfs_ro_volume *v, const uint8_t *p,
         if (rc)
             return rc;
         /* A fork with more logical blocks than its eight extent descriptors
-         * can address needs the extents-overflow tree, which this reader does
-         * not implement.  Mark it unsupported at open instead of failing at a
-         * later read/write. */
-        if (!inline_fork(&e->data))
-            e->unsupported = 1;
+         * can address is read through the extents-overflow B-tree below.
+         * Hard links, symlinks and special files remain unsupported. */
         uint16_t mode_type = e->mode & 0170000;
         e->unsupported |= (mode_type && mode_type != 0100000) ||
             (data[41] & 0x20) ||
@@ -1055,6 +1055,182 @@ int hfs_ro_lookup(struct hfs_ro_volume *v, const char *path,
     return HFS_RO_OK;
 }
 
+/* ---- extents-overflow (read-only) ------------------------------------- */
+
+static int extents_btree_info(struct hfs_ro_volume *v, uint16_t *node_size,
+                              uint32_t *first_leaf, uint32_t *total_nodes)
+{
+    uint8_t prefix[120];
+    int rc = read_fork(v, &v->extents, 0, prefix, sizeof(prefix));
+    if (rc)
+        return rc;
+    if (prefix[8] != 1 || be32(prefix + 4) ||
+        be16(prefix + 10) != 3)
+        return HFS_RO_FORMAT;
+
+    uint16_t size = be16(prefix + 24 + 8); /* nodeSize in BTHeaderRec */
+    uint32_t total = be32(prefix + 36);
+    uint32_t first = be32(prefix + 24);
+    uint32_t leaves = be32(prefix + 20);
+
+    if (!total || !first || !leaves)
+        return HFS_RO_UNSUPPORTED;
+    if (!power2(size) || size < 512 || size > HFS_RO_MAX_NODE_SIZE ||
+        size > v->scratch_size || be16(prefix + 34) != 10 ||
+        first >= total || v->extents.size != (uint64_t)total * size)
+        return HFS_RO_FORMAT;
+
+    *node_size = size;
+    *first_leaf = first;
+    *total_nodes = total;
+    return HFS_RO_OK;
+}
+
+static int extents_collect(struct hfs_ro_volume *v, uint32_t file_id,
+                           uint32_t inline_blocks, uint32_t fork_blocks)
+{
+    if (!v->extents.blocks || !inline_fork(&v->extents))
+        return HFS_RO_UNSUPPORTED;
+
+    uint16_t node_size;
+    uint32_t node, total_nodes;
+    int rc = extents_btree_info(v, &node_size, &node, &total_nodes);
+    if (rc)
+        return rc;
+
+    uint64_t sum = 0;
+    v->overflow_count = 0;
+    v->overflow_valid = 0;
+
+    while (node != 0xffffffffu) {
+        if (node >= total_nodes)
+            return HFS_RO_FORMAT;
+        rc = read_fork(v, &v->extents, (uint64_t)node * node_size,
+                       v->scratch, node_size);
+        if (rc)
+            return rc;
+        validated_node_offsets = 0;
+        if (v->scratch[8] != 0xff)
+            return HFS_RO_FORMAT;
+
+        uint16_t records = be16(v->scratch + 10);
+        for (uint16_t i = 0; i < records; ++i) {
+            const uint8_t *rec;
+            size_t len;
+            rc = node_record(v->scratch, node_size, i, &rec, &len);
+            if (rc || len < 2 + 10 + 8 * 8)
+                return HFS_RO_FORMAT;
+            uint16_t key_len = be16(rec);
+            if (key_len != 10)
+                continue;
+            const uint8_t *key = rec + 2;
+            const uint8_t *data = key + key_len;
+            if (key[0] != 0 || be32(key + 2) != file_id)
+                continue;
+
+            uint32_t logical = be32(key + 6);
+            if (logical != (uint32_t)((uint64_t)inline_blocks + sum))
+                return HFS_RO_FORMAT;
+
+            for (unsigned int j = 0; j < 8; ++j) {
+                uint32_t start = be32(data + j * 8);
+                uint32_t count = be32(data + j * 8 + 4);
+                if (!count)
+                    continue;
+                if (start == 0 || start >= v->blocks ||
+                    count > v->blocks - start ||
+                    v->overflow_count >= HFS_RO_OVERFLOW_EXTENTS)
+                    return HFS_RO_UNSUPPORTED;
+                v->overflow_extents[v->overflow_count].start = start;
+                v->overflow_extents[v->overflow_count].count = count;
+                ++v->overflow_count;
+                sum += count;
+            }
+        }
+
+        node = be32(v->scratch + 0);
+        if ((uint64_t)inline_blocks + sum >= fork_blocks)
+            break;
+    }
+
+    if ((uint64_t)inline_blocks + sum != fork_blocks)
+        return HFS_RO_FORMAT;
+
+    v->overflow_file_id = file_id;
+    v->overflow_valid = 1;
+    return HFS_RO_OK;
+}
+
+static int read_fork_overflow(struct hfs_ro_volume *v,
+                              const struct hfs_ro_entry *entry, uint64_t off,
+                              void *buffer, size_t length)
+{
+    const uint64_t block_size = v->block_size;
+    uint32_t inline_blocks = 0;
+    for (unsigned int i = 0; i < 8; ++i)
+        inline_blocks += entry->data.extents[i].count;
+
+    uint8_t *out = buffer;
+    uint64_t inline_bytes = (uint64_t)inline_blocks * block_size;
+
+    /* Validate the overflow chain before emitting the inline prefix so an
+     * unsupported/fragmented file fails without partial output. */
+    if (!v->overflow_valid || v->overflow_file_id != entry->id) {
+        int rc = extents_collect(v, entry->id, inline_blocks,
+                                 entry->data.blocks);
+        if (rc)
+            return rc;
+    }
+
+    if (off < inline_bytes) {
+        size_t chunk = length;
+        if (inline_bytes - off < chunk)
+            chunk = (size_t)(inline_bytes - off);
+        /* read_fork() insists that the whole fork is inline; present only the
+         * inline prefix here so the overflow records can supply the rest. */
+        struct hfs_ro_fork inl = entry->data;
+        inl.blocks = inline_blocks;
+        int rc = read_fork(v, &inl, off, out, chunk);
+        if (rc)
+            return rc;
+        out += chunk;
+        off += chunk;
+        length -= chunk;
+    }
+    if (!length)
+        return HFS_RO_OK;
+
+    uint64_t skip = off / block_size - inline_blocks;
+    uint64_t within = off % block_size;
+    int first = 1;
+
+    for (unsigned int i = 0; i < v->overflow_count && length; ++i) {
+        const struct hfs_ro_extent *e = &v->overflow_extents[i];
+        if (skip >= e->count) {
+            skip -= e->count;
+            continue;
+        }
+        uint64_t byte_off = skip * block_size + (first ? within : 0);
+        uint64_t bytes = (uint64_t)e->count * block_size;
+        if (byte_off >= bytes)
+            return HFS_RO_FORMAT;
+        size_t chunk = length;
+        if (bytes - byte_off < chunk)
+            chunk = (size_t)(bytes - byte_off);
+        int rc = read_volume(v, (uint64_t)e->start * block_size + byte_off,
+                             out, chunk);
+        if (rc)
+            return rc;
+        out += chunk;
+        length -= chunk;
+        skip = 0;
+        within = 0;
+        first = 0;
+    }
+
+    return length ? HFS_RO_FORMAT : HFS_RO_OK;
+}
+
 int hfs_ro_pread(struct hfs_ro_volume *v, const struct hfs_ro_entry *entry,
                  uint64_t offset, void *buffer, size_t length, size_t *done)
 {
@@ -1064,13 +1240,17 @@ int hfs_ro_pread(struct hfs_ro_volume *v, const struct hfs_ro_entry *entry,
         return HFS_RO_ARGUMENT;
     if (entry->kind == 1)
         return HFS_RO_IS_DIR;
-    if (entry->kind != 2 || entry->unsupported || !inline_fork(&entry->data))
+    if (entry->kind != 2 || entry->unsupported)
         return HFS_RO_UNSUPPORTED;
     if (offset >= entry->data.size || !length)
         return HFS_RO_OK;
     if (entry->data.size - offset < length)
         length = (size_t)(entry->data.size - offset);
-    int rc = read_fork(v, &entry->data, offset, buffer, length);
+    int rc;
+    if (inline_fork(&entry->data))
+        rc = read_fork(v, &entry->data, offset, buffer, length);
+    else
+        rc = read_fork_overflow(v, entry, offset, buffer, length);
     if (!rc)
         *done = length;
     return rc;

@@ -3,8 +3,8 @@
 Status: reviewed 2026-11-02 for V3.0.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Public stable release identity: **V3.0 // Version V13.0**.
-Current build line: `docs/VERSION` is `3.2.0-beta3-v13.0` (V3.2 Beta 3).
-Current test build: **V3.2 Beta 3 — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
+Current build line: `docs/VERSION` is `3.2.0-beta4-v13.0` (V3.2 Beta 4).
+Current test build: **V3.2 Beta 4 — Thermo-Nuclear** (experimental, P0 hardware-unverified).
 Next stable release: **TBD**.
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
@@ -34,12 +34,12 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 - Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
   final release unless the owner explicitly names a beta.
 - Current stable: **V3.0 // Version V13.0**.
-- Current owner-named experimental beta: **V3.2 Beta 3 — “Thermo-Nuclear”**.
+- Current owner-named experimental beta: **V3.2 Beta 4 — Thermo-Nuclear**.
 - The previously drafted V3.1 “Nuclear and Readable” stable name is deferred;
   V3.1 stable was not released.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. A local commit,
-  build or draft is not permission to publish. **V3.2 Beta 3 “Thermo-Nuclear” is
+  build or draft is not permission to publish. **V3.2 Beta 4 Thermo-Nuclear is
   owner-approved for publication with the P0 hardware gates recorded as not
   run.**
 
@@ -123,8 +123,7 @@ Important:
 - Records: folder 1, file 2, thread 3/4. Threads are validated and skipped for the namespace.
 - Names are UTF-16BE -> UTF-8. `/` becomes `:`, `:` is rejected, `.`/`..` are rejected, invalid surrogates fail.
 - Lookup is **exact byte comparison**. No Unicode normalization or case folding.
-- Non-inline forks are marked unsupported at open.
-- Extents-overflow trees are unsupported.
+- Data forks with more than eight inline extents are read through the extents-overflow tree (read-only, up to 128 overflow extents). Metadata forks and the overlay container must stay inline; writes materialize data into the overlay.
 
 ---
 
@@ -248,7 +247,7 @@ Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware
 | Target | `ipod6g` only |
 | Filesystem | HFS+ v4; no APFS/HFSX |
 | Journal | clean only; no replay |
-| Extents | eight inline; no extents-overflow tree |
+| Extents | eight inline; read-only data-fork extents-overflow tree (up to 128 extents); container and metadata forks inline |
 | Overlay | 16 MiB minimum, 2 GiB maximum, fixed size; v3 reserves 256 KiB for the index cache |
 | Entries | 2,048 |
 | Names | exact bytes; no Unicode normalization/case folding |
@@ -484,6 +483,7 @@ Hard stops:
 | `docs/release-v3.2-beta.md` | V3.2 Beta 1 release notes, warnings and hashes |
 | `docs/release-v3.2-beta2.md` | V3.2 Beta 2 release notes, freeze fix and hashes |
 | `docs/release-v3.2-beta3.md` | V3.2 Beta 3 release notes, sleep/wake rollback and hashes |
+| `docs/release-v3.2-beta4.md` | V3.2 Beta 4 release notes, extents-overflow support and hashes |
 | `docs/v3.2-validation.md` | V3.2 host/build evidence and unexecuted device gates |
 | `docs/v3.2-review.md` | V3.2 thermo-nuclear code-quality review |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |

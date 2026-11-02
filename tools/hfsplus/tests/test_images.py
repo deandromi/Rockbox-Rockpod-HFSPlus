@@ -17,6 +17,9 @@ CONTAINER_BLOCKS = 4096
 CAT = 5 * BLOCK
 UNICODE_NAME = "E\u0301tude 🎵.bin"
 PAYLOAD = bytes((i * 37 + 19) % 256 for i in range(5003))
+OVERFLOW_BLOCKS = 9
+OVERFLOW_PAYLOAD = bytes((i * 19 + 7) % 256
+                            for i in range(OVERFLOW_BLOCKS * BLOCK))
 BINARY = str(Path(sys.argv[1]).resolve())
 sys.argv = sys.argv[:1]
 
@@ -54,15 +57,24 @@ def folder(parent, name, cnid, children):
     return key(parent, name) + data
 
 
-def file_record(parent, name, cnid, size, extents, mode=0o100644, flags=0):
+def file_record(parent, name, cnid, size, extents, mode=0o100644, flags=0,
+                total=None):
     data = bytearray(248)
     struct.pack_into(">HHII", data, 0, 2, 2, 0, cnid)
     put32(data, 12, HFS_DATE)
     put32(data, 16, HFS_DATE)
     put16(data, 42, mode)
     data[41] = flags
-    data[88:168] = fork(size, extents)
+    data[88:168] = fork(size, extents, total)
     return key(parent, name) + data
+
+
+def extent_record(file_id, start_block, extents):
+    key = struct.pack(">BBII", 0, 0, file_id, start_block)
+    data = b"".join(struct.pack(">II", start, count)
+                    for start, count in extents)
+    data = data.ljust(8 * 8, b"\0")
+    return struct.pack(">H", 10) + key + data
 
 
 def thread(cnid, parent, name, is_folder=False):
@@ -102,7 +114,8 @@ def checksum(b):
     return value ^ 0xffffffff
 
 
-def image(journal=False, little=False, blocks=BLOCKS, container=False):
+def image(journal=False, little=False, blocks=BLOCKS, container=False,
+          overflow=False):
     b = bytearray(BLOCK * blocks)
     records = [
         folder(1, "Test volume", 2, 2),
@@ -110,17 +123,20 @@ def image(journal=False, little=False, blocks=BLOCKS, container=False):
         folder(2, ".rockbox", 16, 1),
         *([file_record(2, ".rockpod-rw", 25, 16 * 1024 * 1024,
                        [(CONTAINER_START, CONTAINER_BLOCKS)])] if container else []),
-        folder(2, "Music", 17, 3),
+        folder(2, "Music", 17, 4 if overflow else 3),
         thread(16, 2, ".rockbox", True),
         file_record(16, "rockbox.ipod", 18, 12, [(26, 1)]),
         thread(17, 2, "Music", True),
         file_record(17, "empty.bin", 21, 0, []),
         file_record(17, UNICODE_NAME, 20, 7, [(24, 1)]),
         file_record(17, "track.bin", 19, len(PAYLOAD), [(20, 1), (22, 1)]),
+        *([file_record(17, "overflow.bin", 22, OVERFLOW_BLOCKS * BLOCK,
+                       [(52, 1)], total=OVERFLOW_BLOCKS)] if overflow else []),
         thread(18, 16, "rockbox.ipod"),
         thread(19, 17, "track.bin"),
         thread(20, 17, UNICODE_NAME),
         thread(21, 17, "empty.bin"),
+        *([thread(22, 17, "overflow.bin")] if overflow else []),
         *([thread(25, 2, ".rockpod-rw")] if container else []),
     ]
     split = (len(records) + 1) // 2
@@ -134,11 +150,22 @@ def image(journal=False, little=False, blocks=BLOCKS, container=False):
     b[CAT + 2 * BLOCK:CAT + 3 * BLOCK] = node(-1, 1, leaves[1], back=1)
     b[CAT + 3 * BLOCK:CAT + 4 * BLOCK] = node(0, 2, index)
     b[4 * BLOCK:5 * BLOCK] = header_node(0, 0, 0, 0, 0, 1, False)
+    if overflow:
+        # Extents-overflow B-tree: header at 50, one leaf at 51. File 22 has
+        # one inline block and eight overflow blocks.
+        b[50 * BLOCK:51 * BLOCK] = header_node(0, 0, 1, 1, 1, 2, False)
+        b[51 * BLOCK:52 * BLOCK] = node(-1, 1, [
+            extent_record(22, 1, [(60 + i, 1) for i in range(8)])
+        ])
     b[20 * BLOCK:21 * BLOCK] = PAYLOAD[:BLOCK]
     b[22 * BLOCK:22 * BLOCK + len(PAYLOAD) - BLOCK] = PAYLOAD[BLOCK:]
     b[24 * BLOCK:24 * BLOCK + 7] = b"unicode"
     b[26 * BLOCK:26 * BLOCK + 12] = b"TEST ONLY!!!"
     allocated = {0, 3, 4, 5, 6, 7, 8, 20, 22, 24, 26, blocks - 1}
+    if overflow:
+        b[52 * BLOCK:53 * BLOCK] = OVERFLOW_PAYLOAD[:BLOCK]
+        b[60 * BLOCK:68 * BLOCK] = OVERFLOW_PAYLOAD[BLOCK:]
+        allocated.update({50, 51, 52, *range(60, 68)})
     vh = bytearray(512)
     struct.pack_into(">HHI", vh, 0, 0x482b, 4, (1 << 8) | ((1 << 13) if journal else 0))
     vh[8:12] = b"HFSJ" if journal else b"10.0"
@@ -148,7 +175,8 @@ def image(journal=False, little=False, blocks=BLOCKS, container=False):
     put32(vh, 44, blocks)
     put32(vh, 64, 22)
     vh[112:192] = fork(blocks // 8, [(3, 1)])
-    vh[192:272] = fork(BLOCK, [(4, 1)])
+    vh[192:272] = (fork(2 * BLOCK, [(50, 2)]) if overflow
+                   else fork(BLOCK, [(4, 1)]))
     vh[272:352] = fork(BLOCK * 4, [(5, 4)])
     if journal:
         put32(vh, 12, 2)
@@ -220,6 +248,21 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(self.run_image(image(), "cat", "/Music/track.bin").stdout, PAYLOAD)
         self.assertEqual(self.run_image(image(), "cat", "/.rockbox/rockbox.ipod").stdout,
                          b"TEST ONLY!!!")
+
+    def test_extents_overflow_file(self):
+        b = image(overflow=True)
+        self.assertEqual(self.run_image(b, "cat", "/Music/overflow.bin").stdout,
+                         OVERFLOW_PAYLOAD)
+        listing = self.run_image(b, "ls", "/Music").stdout
+        self.assertIn(b"overflow.bin", listing)
+        for start, size in [(0, 17), (4090, 30), (3 * BLOCK, 9000),
+                            (8 * BLOCK - 10, 10)]:
+            with self.subTest(start=start, size=size):
+                p = self.run_image(b, "cat", "/Music/overflow.bin",
+                                   options=("--skip", str(start),
+                                            "--count", str(size)))
+                self.assertEqual(p.stdout,
+                                 OVERFLOW_PAYLOAD[start:start + size])
 
     def test_unicode_and_empty_file(self):
         self.assertEqual(self.run_image(image(), "cat", "/Music/" + UNICODE_NAME).stdout, b"unicode")

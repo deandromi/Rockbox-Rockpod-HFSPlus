@@ -13,6 +13,7 @@
 #define HFS_RO_INDEX_MAGIC "RPIDX1"
 #define HFS_RO_INDEX_VERSION 1u
 #define HFS_RO_INDEX_HEADER 64u
+#define HFS_RO_OVERFLOW_EXTENTS 128u
 
 enum hfs_ro_error {
     HFS_RO_OK = 0,
@@ -101,6 +102,13 @@ struct hfs_ro_volume {
     uint8_t *catalog_cache;
     size_t catalog_cache_size;
     uint32_t catalog_cache_node;
+    /* Read-only cache of extents-overflow records for one file at a time.
+     * Sequential plugin data reads stay on the same file, so one slot is
+     * enough to avoid rescanning the extents B-tree per read. */
+    struct hfs_ro_extent overflow_extents[HFS_RO_OVERFLOW_EXTENTS];
+    uint32_t overflow_file_id;
+    uint16_t overflow_count;
+    uint8_t overflow_valid;
     struct hfs_ro_dirloc dir_index[HFS_RO_DIR_INDEX_MAX];
     uint16_t dir_index_count;
     uint8_t dir_index_complete;

@@ -2,8 +2,8 @@
 
 Status: source-derived, local build verified 2026-11-01.
 Stable release identity: **Rockpod HFS+ — V3.0 // Version V13.0**.
-Current owner-named experimental beta: **V3.2 Beta 3 — “Thermo-Nuclear”** (P0 hardware-unverified).
-Current build line: `docs/VERSION` = `3.2.0-beta3-v13.0`.
+Current owner-named experimental beta: **V3.2 Beta 4 — Thermo-Nuclear** (P0 hardware-unverified).
+Current build line: `docs/VERSION` = `3.2.0-beta4-v13.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
 Companion document: `agents.md` (architecture, invariants, code-quality review).
@@ -79,21 +79,21 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 - APFS, HFSX, FAT32 as the intended data volume (FAT32 remains a fallback path, not the release goal).
 - Windows/Linux installation.
 - Resource forks, symlinks, hardlinks, macOS compression, encryption, HFS wrappers.
-- Extents-overflow files, including an overlay container that needs them.
+- Extents-overflow metadata or an overlay container that needs them. Native data files with a read-only extents-overflow tree are supported up to 128 overflow extents.
 - On-device database rebuild as the documented workflow.
 - Unverified iPod Classic revisions, storage adapters, or capacity beyond the device’s normal limits.
 
 ### 1.3 Naming
 
 - Stable public name: **V3.0 // Version V13.0**.
-- Current owner-named experimental beta: **V3.2 Beta 3 — “Thermo-Nuclear”**.
+- Current owner-named experimental beta: **V3.2 Beta 4 — Thermo-Nuclear**.
 - Official non-beta releases always carry a codename in the release title and
   notes. Beta/pre-release builds keep `Vx.y Beta N`; the final codename is not
   used for a beta unless the owner explicitly names it.
 - Every release must state its **update type** in the release notes:
   `firmware only`, `bootloader only`, or `both firmware and bootloader`, with
   the assets grouped accordingly. This is a required field, not a footnote.
-- `docs/VERSION` on the current beta line: `3.2.0-beta3-v13.0`.
+- `docs/VERSION` on the current beta line: `3.2.0-beta4-v13.0`.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. **V3.2 Beta 3
   “Thermo-Nuclear” is owner-approved for publication with the P0 hardware

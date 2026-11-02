@@ -756,16 +756,26 @@ static void init(void)
         CHART("<eeprom_settings_store");
     }
 #endif
+    CHART(">playlist_init");
     playlist_init();
+    CHART("<playlist_init");
+    CHART(">tree_mem_init");
     tree_mem_init();
+    CHART("<tree_mem_init");
+    CHART(">filetype_init");
     filetype_init();
+    CHART("<filetype_init");
 
+    CHART(">shortcuts_init");
     shortcuts_init();
+    CHART("<shortcuts_init");
 
     CHART(">audio_init");
     audio_init();
     CHART("<audio_init");
+    CHART(">talk_announce");
     talk_announce_voice_invalid(); /* notify user w/ voice prompt if voice file invalid */
+    CHART("<talk_announce");
 
 #ifdef HAVE_WIFI
     wifi_init();
@@ -791,9 +801,9 @@ static void init(void)
     check_bootfile(false); /* remember write time and filesize */
     CHART(">check_bootfile(false)");
 #endif
-    CHART("<settings_apply_skins");
-    settings_apply_skins();
     CHART(">settings_apply_skins");
+    settings_apply_skins();
+    CHART("<settings_apply_skins");
 }
 
 #ifdef CPU_PP

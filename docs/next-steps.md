@@ -1,10 +1,10 @@
 # Next steps — V2.1.1 and later
 
-Status: V3.2 Beta 3 “Thermo-Nuclear” experimental build from the V3.0/V2.1.1
+Status: V3.2 Beta 4 Thermo-Nuclear experimental build from the V3.0/V2.1.1
 baseline. The adapter is decomposed, the v3 overlay format and persistent index
 cache are implemented, and the read-only USB path is hardware-tested. This beta
 adds the P0/P1 efficiency portfolio; P0 hardware gates and device power/resume
-tests are not executed. See `release-v3.2-beta3.md` and `v3.2-validation.md`.
+tests are not executed. See `release-v3.2-beta4.md` and `v3.2-validation.md`.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 

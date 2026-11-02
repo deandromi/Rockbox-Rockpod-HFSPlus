@@ -173,6 +173,10 @@ class AdapterTests(unittest.TestCase):
     def test_readwrite_and_remount(self):
         self.run_harness(self.image, "rw")
 
+    def test_native_extents_overflow_read(self):
+        self.run_harness(fixtures.image(container=True, overflow=True, blocks=16384),
+                         "overflow")
+
     def test_container_extent_in_metadata_is_rejected(self):
         b = bytearray(self.image)
         fork = container_fork_offset(b)

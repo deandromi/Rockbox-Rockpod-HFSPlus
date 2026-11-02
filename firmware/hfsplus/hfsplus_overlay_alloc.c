@@ -297,6 +297,7 @@ int overlay_materialize_base(struct hfs_state *s,
             return rc;
         struct hfs_ro_entry src;
         memset(&src, 0, sizeof(src));
+        src.id = e->base_id;
         src.kind = 2;
         src.data = *fork;
         uint8_t *copy = overlay_copy_buffer(s);

@@ -570,7 +570,7 @@ static int test_readdir(void)
 
 static int test_find(void)
 {
-    struct fat_file root, file;
+    struct fat_file root, file, dir;
     struct fat_filestr st;
     struct fat_direntry e;
     CHECK(mount_image() == 0);
@@ -584,6 +584,19 @@ static int test_find(void)
     CHECK(hfsplus_find(&st, "missing.txt", &e) == 0);
     CHECK(hfsplus_find(&st, "missing.txt", &e) == 0); /* negative cache */
 
+    CHECK(open_path(".rockbox", NULL, &root, &dir) == 0);
+    st.fatfilep = &dir;
+    CHECK(hfsplus_find(&st, "rockbox.ipod", &e) == 1);
+    CHECK(!strcmp((char *)e.name, "rockbox.ipod"));
+    CHECK(hfsplus_find(&st, "ROCKBOX.IPOD", &e) == 1);
+
+    CHECK(open_path("Music", NULL, &root, &dir) == 0);
+    st.fatfilep = &dir;
+    CHECK(hfsplus_find(&st, "empty.bin", &e) == 1);
+    CHECK(hfsplus_find(&st, "EMPTY.BIN", &e) == 1);
+
+    st.fatfilep = &root;
+
     CHECK(hfsplus_create_file(&root, "new.txt", ATTR_ARCHIVE, &file,
                               NULL) == 0);
     CHECK(hfsplus_find(&st, "new.txt", &e) == 1);
@@ -593,6 +606,28 @@ static int test_find(void)
     CHECK(hfsplus_find(&st, "renamed.txt", &e) == 1);
     CHECK(hfsplus_remove(&file, FAT_RM_ALL) == 0);
     CHECK(hfsplus_find(&st, "renamed.txt", &e) == 0);
+
+    hfsplus_unmount(0);
+    return 0;
+}
+
+static int test_overflow(void)
+{
+    struct fat_file root, dir, file;
+    struct fat_filestr fs;
+    uint8_t buf[9 * 4096];
+    CHECK(mount_image() == 0);
+    CHECK(hfsplus_overlay_ready(0));
+    CHECK(!hfsplus_open_root(0, &root));
+    CHECK(open_path("Music", NULL, &root, &dir) == 0);
+    CHECK(open_path("Music", "overflow.bin", &root, &file) == 0);
+
+    memset(&fs, 0, sizeof(fs));
+    fs.fatfilep = &file;
+    CHECK(hfsplus_seek(&fs, 0) == 0);
+    CHECK(hfsplus_readwrite(&fs, 9 * 8, buf, false) == 9 * 8);
+    for (unsigned int i = 0; i < sizeof(buf); ++i)
+        CHECK(buf[i] == (uint8_t)(i * 19 + 7));
 
     hfsplus_unmount(0);
     return 0;
@@ -683,6 +718,7 @@ int main(int argc, char **argv)
     else if (!strcmp(test, "readdir")) rc = test_readdir();
     else if (!strcmp(test, "find")) rc = test_find();
     else if (!strcmp(test, "readdir-buckets")) rc = test_readdir_buckets();
+    else if (!strcmp(test, "overflow")) rc = test_overflow();
     else { fprintf(stderr, "unknown test\n"); return 2; }
     if (save_image(argv[2]))
         return 2;
