@@ -24,6 +24,10 @@ FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as o
 
 V3.0 decomposes the adapter, introduces the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3.0 requires a new v3 overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
 
+**Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2-final)
+is the final V2.1.1 package. It keeps an existing v1/v2 overlay and does not
+require the V3.0 new-overlay step.
+
 ## Compatibility and limits
 
 - macOS only for installation, database generation and recovery.

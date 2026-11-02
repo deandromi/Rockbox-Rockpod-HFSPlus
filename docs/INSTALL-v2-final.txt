@@ -1,0 +1,69 @@
+ROCKPOD HFS+ V2 FINAL LEGACY - SIMPLE INSTALL
+=============================================
+
+This is the final V1/V2 line (V2.1.1 binaries). It uses the existing v1/v2
+overlay and does NOT require the V3.0 new-overlay step.
+
+0) BACK UP FIRST
+   Copy the iPod and, if present, /.rockpod-rw to your Mac.
+
+1) APPLE DISK MODE
+   Disconnect USB. Hold Menu+Select until reset. When the Apple logo appears,
+   hold Select+Play/Pause until "Disk Mode" appears. Connect USB and wait for
+   /Volumes/IPOD.
+
+2) OVERLAY
+   Keep an existing v1/v2 /.rockpod-rw.
+   For a new install only:
+       mkfile 1g "/Volumes/IPOD/.rockpod-rw"
+   Do not use a sparse file.
+
+3) FIRMWARE
+   From the bundle directory:
+       unzip -o rockbox.zip -d "/Volumes/IPOD"
+       test -f "/Volumes/IPOD/.rockbox/rockbox.ipod"
+       sync
+       diskutil eject "/Volumes/IPOD"
+
+4) APPLE DEVICE BLOCKER (Terminal 1)
+       cd /path/to/bundle
+       python3 apple-device-blocker.py
+   Leave it running. Stop it with Control-C after the bootloader install.
+
+5) DFU SCANNER + BOOTLOADER (Terminal 2)
+       cd /path/to/bundle
+       chmod +x mks5lboot
+       ./mks5lboot --dfuscan --loop 1
+   Put the iPod in DFU: disconnect USB, hold Menu+Select about 12 seconds,
+   reconnect USB while holding, then release. The screen stays black.
+   Wait for "DFU device state: 2", then Control-C the scanner.
+
+       ./mks5lboot --bl-inst bootloader-ipod6g.ipod
+
+   NEVER add --single. Do not unplug during the NOR write.
+   Expected: alive tone, success dual tone, automatic reboot.
+   Failure: one 330 Hz tone = install failed; three = possible NOR corruption.
+   Stop and keep the installer output.
+
+6) RETURN TO TERMINAL 1
+   Press Control-C to resume the Apple helpers.
+
+7) FIRST BOOT
+   Open Debug -> View disk info. Expect:
+       HFS+ overlay: READY
+       Overlay stage: 9
+       Overlay error: 0
+
+8) MUSIC DATABASE
+   Use the Mac database/artwork workflow from the main README. Do not use
+   on-device Database Initialize/Update or PictureFlow rebuild.
+
+RECOVERY
+- Re-enter Apple Disk Mode to reinstall rockbox.zip.
+- Do not format, erase, restore or delete /.rockpod-rw to "fix" a software error.
+- Preserve /.rockpod-rw before any repair.
+- Apple Disk Mode is the only supported transfer path; do not use Rockbox USB
+  mass-storage mode.
+
+V3.0 is a separate line and requires a new v3 overlay. V2 Final keeps the
+v1/v2 overlay and does not include the v3 index cache.
