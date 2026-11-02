@@ -304,7 +304,18 @@ common/fat.c
 #ifdef HAVE_HFSPLUS_RO
 hfsplus/hfsplus_ro.c
 hfsplus/hfsplus_partition.c
-hfsplus/hfsplus_rb.c
+hfsplus/hfsplus_state.c
+hfsplus/hfsplus_diag.c
+hfsplus/hfsplus_io.c
+hfsplus/hfsplus_overlay_format.c
+hfsplus/hfsplus_overlay_alloc.c
+hfsplus/hfsplus_overlay_store.c
+hfsplus/hfsplus_time.c
+hfsplus/hfsplus_overlay_validate.c
+hfsplus/hfsplus_overlay_load.c
+hfsplus/hfsplus_namespace.c
+hfsplus/hfsplus_fat.c
+hfsplus/hfsplus_mount.c
 #endif
 common/file.c
 common/file_internal.c

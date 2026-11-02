@@ -298,6 +298,7 @@ diskutil eject "/Volumes/IPOD"
    HFS+ overlay: READY
    Overlay stage: 9
    Overlay error: 0
+   Overlay reason: 0 none
    ```
 3. Select a theme, wait for disk idle, power off through the Rockbox menu, and boot again. The theme should persist.
 4. Confirm **Database** playback and, if installed, Cover Flow.
@@ -319,6 +320,9 @@ Install a new bootloader only when the release notes say so. After adding or ret
 - **Overlay stage 9, error 0**: overlay is ready.
 - **Stages 1–6**: container lookup/header/bitmap validation failed.
 - **Stages 7–8**: an overlay entry is invalid; the debug slot identifies it.
+- **Stage 11**: whole-overlay validation failed. `Overlay slot` is the failing
+  entry index (`-1` for a table-wide failure) and `Overlay reason` names the
+  check (for example `11 data-unallocated`).
 - **Mount error -4**: the native HFS+ volume needs consistency checking or journal replay.
 - **`.rockbox` missing**: do not delete or recreate the overlay. Back up `.rockpod-rw`, run `diskutil verifyVolume "/Volumes/IPOD"`, and inspect the debug values.
 - **Wrong or damaged bootloader**: reinstall over DFU; firmware files alone cannot repair NOR.

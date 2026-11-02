@@ -371,14 +371,14 @@ Do not assume one cause. Capture the layer before changing anything.
 | Symptom | First checks | Likely layer |
 |---|---|---|
 | Native music file changed/unplayable | `diskutil verifyVolume`, ATA SMART, USB/connection history, storage error logs | macOS/USB write while in Rockbox mode, storage/hardware, or a false partition geometry (HFS-006/007/008). Overlay writes normally stay inside `.rockpod-rw`; verify the container extents were not changed under a running mount. |
-| `.rockbox` config, playlists or database lost/corrupt | Debug disk info overlay stage/error/slot; preserve `.rockpod-rw`; read-only overlay inspection; host backup | Overlay HFS-001/002 (bitmap/entry ordering), HFS-004 (directory rename), HFS-090 (CNID/tombstone), HFS-039 (no flush on reset). |
+| `.rockbox` config, playlists or database lost/corrupt | Debug disk info overlay stage/error/slot/reason; preserve `.rockpod-rw`; read-only overlay inspection; host backup | Overlay HFS-001/002 (bitmap/entry ordering), HFS-004 (directory rename), HFS-090 (CNID/tombstone), HFS-039 (no flush on reset). |
 | Files disappear/reappear after renaming a directory | Reproduce on a copy with the host harness; inspect overlay parent IDs | HFS-004. |
 | Duplicate filenames or divergent copies | Inspect overlay entries for duplicate IDs/BASE shadows | HFS-025/091. |
 | PictureFlow crash/garbage after a corruption incident | Check `.pfraw`/`pictureflow_album.idx` sizes; validate headers; disable cache; avoid on-device rebuild | HFS-082/083/084/087/103/112/114. |
 | `View disk info` missing SSD/SMART/flush lines | Source check | HFS-081. |
 | Album art cache ignored on albums without Album Artist | Compare tagcache `database_7.tcd` value with `.pfraw` filename | HFS-075. |
 | Startup `-4` | `diskutil verifyVolume`, clean eject, journal state | Native HFS+ dirty/inconsistent volume, not the overlay. |
-| Config write error `-83` or overlay `OFF` | Overlay stage/error | Overlay load failure (stage 1–10), not native HFS+ corruption. |
+| Config write error `-83` or overlay `OFF` | Overlay stage/error/slot/reason | Overlay load failure (stage 1–10) or validation failure (stage 11), not native HFS+ corruption. |
 
 The official Rockbox USB mass-storage corruption is a separate upstream issue. It can damage the native volume independently of this fork; do not use Rockbox USB mode as a test of overlay correctness.
 

@@ -1,6 +1,9 @@
 # Next steps — V2.1.1 and later
 
 Status: V2.1.1 released and confirmed working on the test iPod Classic 6G.
+Post-V2.1.1: the adapter decomposition is complete, stage 11 diagnostics are
+implemented, and the immutable-container write fast path is in. Host/build
+verified; no device or power measurement has been recorded for these changes.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 
@@ -49,41 +52,65 @@ Full checklist: [`docs/hardware-validation.md`](hardware-validation.md).
 
 ## Thermo-nuclear code-quality review
 
-The full current review is in [`agents.md`](../agents.md) §8. Top findings:
+The full current review is in [`agents.md`](../agents.md) §8. Post-decomposition
+state:
 
-1. **`hfsplus_rb.c` is ~2,800 lines** and mixes I/O, overlay format,
-   allocator, persistence, namespace merge, FAT adapter and diagnostics.
-   Decompose before more features.
-2. **`shadowed[]` is a second source of truth.** Visibility is checked in
-   roughly ten places; one missed check reintroduces the duplicate-name
-   failure. Replace it with one `overlay_entry_visible()` predicate or a
-   resolved-entry table.
+1. **The monolith is gone.** `hfsplus_rb.c` was split into I/O, format,
+   allocation, store, validator, loader, namespace, FAT, mount, state,
+   diagnostics and time modules. The largest adapter module is under 500 lines.
+2. **`shadowed[]` reads are centralized.** Every visibility read now goes
+   through `overlay_entry_visible()`; the validator still computes the shadow
+   set. A resolved-entry table or explicit entry mode would remove the remaining
+   write-side coupling.
 3. **Legacy compatibility is ad-hoc.** Duplicate names, duplicate
-   BASE/tombstone entries and `base_id` without `BASE` are handled by separate
-   branches. Resolve an explicit entry mode once at load.
-4. **Stage 11 cannot report why validation failed.** It returns `-2` with
-   slot `-1`; finding the V2.1.1 bug required reverse-engineering. Add a
-   reason code and failing slot.
-5. **The C and Python validators are independent implementations.** They
+   BASE/tombstone entries and `base_id` without `BASE` are still handled by
+   separate branches in the validator.
+4. **The C and Python validators are independent implementations.** They
    diverged on the exact `base_id`/`BASE` bug. Share fixtures or generate both
    from one specification.
-6. **v1/v2 format branches are scattered** through header parse, sync, bitmap
-   and backup offsets. A small format driver would delete the conditional
-   matrix.
-7. **`overlay_load()` is a ~190-line monolith.** Split header/backup recovery,
-   fresh initialization, chunked entry reads and index rebuild.
-8. **`#ifdef BOOTLOADER` sits inside `hfsplus_mount()`.** Separate the native
-   boot mount path from the firmware mount lifecycle.
-9. **Endian/bounds helpers are duplicated** across the reader, partition
+5. **Endian/bounds helpers are still duplicated** across the reader, partition
    scanner and adapter.
-10. **The write capability model is historical.** `fat_is_readonly()` lies by
-    name; consolidate into one explicit write-mode query.
+6. **The write capability model is historical.** `fat_is_readonly()` lies by
+   name; consolidate into one explicit write-mode query.
+7. **`overlay_validate()` keeps O(U²) legacy duplicate resolution.** It only
+   matters at a full 2,048-entry overlay; a two-pass key/winner table would
+   remove it.
 
 ### Fix first
 
-1. Stage 11 diagnostics: reason code + failing slot.
-2. One central overlay visibility predicate/resolved-entry table.
-3. Then decompose `hfsplus_rb.c`.
+1. Run the hardware power-loss matrix now that the commit paths are isolated.
+2. Share validator fixtures between C and `overlay_check.py`.
+3. Resolve the remaining legacy entry-mode branches in the validator.
+4. Decide the next efficiency step: persisted directory index or a v3
+   used-slot summary (see [`efficiency.md`](efficiency.md)).
+
+Stage 11 diagnostics (reason code + failing slot) were completed after V2.1.1:
+`overlay_validate()` returns a result struct, the debug screen shows the reason
+name and failing entry, and seven host adapter tests assert the reason/slot
+pairs.
+
+---
+
+## Efficiency and power
+
+The disk/CPU audit is in [`efficiency.md`](efficiency.md). Implemented:
+
+- Overlay container writes no longer revalidate the immutable container fork or
+  reread the native allocation bitmap on every write. Stage 2 validates once;
+  `write_container_inline()` only maps extents.
+
+Still open, in priority order:
+
+1. Firmware mount builds the full directory/CNID index by scanning every
+   catalog leaf record. Persist it or build it lazily.
+2. Overlay mount reads all 2,048 entry slots (640 KiB) even for tiny overlays.
+   A v3 used-slot summary is the clean fix.
+3. ATA flushes are part of the durability contract; batching them needs a
+   WAL/commit-group design and the power-loss matrix.
+4. `overlay_validate()` and readdir have CPU-only hotspots that matter mainly
+   for large overlays/directories.
+
+Do not trade crash consistency for power without the hardware matrix.
 
 ---
 
@@ -112,29 +139,3 @@ Safe position:
 - Ask for the exact files/lines if they want a separate MIT grant for a subset.
 - Ask how the hub stores source/snippets and satisfies GPL source/notice
   requirements.
-
-### Draft reply
-
-```text
-Hi Ivan,
-
-Thanks for the note and the kind words about the V1.1 work.
-
-I can't confirm blanket MIT relicensing for that commit. The repository is
-GPL-2.0-or-later, and the commit includes Rockbox/Rockpod-derived and restored
-upstream code, so the whole commit isn't mine to relicense under MIT. I'm happy
-for it to be included in Corpus Hub under GPL-2.0-or-later with attribution to
-me and to deandromi/Rockbox-Rockpod-HFSPlus, provided the GPL notices and
-source are preserved.
-
-If you want MIT terms for a specific subset, send me the exact files and lines
-you consider solely my original work and I'll review that separately.
-
-I did look at XERJ. The 2.7x token claim is tempting, and I'll try it once my
-coding agent stops burning 1.06M tokens reading files one by one. If it can
-also retrieve the GPL-2.0 passage about not imposing further restrictions, I'll
-consider that a benchmark.
-
-Best,
-Deandromi
-```

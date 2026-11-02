@@ -13,6 +13,9 @@ sys.argv = [sys.argv[0], "/bin/true"]
 import test_images as fixtures
 
 HARNESS = ""
+ID_BASE = 0x40000000
+FLAG_USED = 1
+FLAG_TOMBSTONE = 8
 
 
 def overlay_layout(b, base):
@@ -187,6 +190,101 @@ class AdapterTests(unittest.TestCase):
         struct.pack_into("<I", b, base + entry_start + other["slot"] * 320,
                          victim["id"])
         self.run_harness(bytes(b), "readonly")
+
+    def run_diag(self, image):
+        src = self.path("diag-in.hfs")
+        dst = self.path("diag-out.hfs")
+        src.write_bytes(image)
+        p = subprocess.run([HARNESS, str(src), str(dst), "diag"],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        fields = {}
+        for token in p.stdout.split():
+            key, _, value = token.partition("=")
+            fields[key] = value
+        return fields
+
+    def two_file_overlay(self):
+        b = bytearray(self.run_harness(self.image, "twofiles"))
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        es, bitmap, entry_start, _ = entries(b, base)
+        files = [e for e in es if e["data_blocks"] > 0]
+        self.assertGreaterEqual(len(files), 2)
+        return b, base, bitmap, entry_start, files
+
+    def assert_stage11(self, diag, slot, reason_name):
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "0")
+        self.assertEqual(diag["stage"], "11")
+        self.assertEqual(diag["error"], "-2")
+        self.assertEqual(diag["slot"], str(slot))
+        self.assertEqual(diag["reason_name"], reason_name)
+
+    def test_healthy_overlay_reports_no_reason(self):
+        diag = self.run_diag(self.image)
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "1")
+        self.assertEqual(diag["stage"], "9")
+        self.assertEqual(diag["slot"], "-1")
+        self.assertEqual(diag["reason_name"], "none")
+
+    def test_stage11_unallocated_range_reports_slot_and_reason(self):
+        b, base, bitmap, _, files = self.two_file_overlay()
+        victim = files[0]
+        block = victim["data_start"]
+        b[base + bitmap + (block >> 3)] &= ~(1 << (block & 7))
+        self.assert_stage11(self.run_diag(bytes(b)), victim["slot"],
+                            "data-unallocated")
+
+    def test_stage11_overlapping_range_reports_slot_and_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim, other = files[0], files[1]
+        struct.pack_into("<I", b, base + entry_start + other["slot"] * 320 + 24,
+                         victim["data_start"])
+        expected = max(victim["slot"], other["slot"])
+        self.assert_stage11(self.run_diag(bytes(b)), expected, "data-overlap")
+
+    def test_stage11_duplicate_id_reports_slot_and_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim, other = files[0], files[1]
+        struct.pack_into("<I", b, base + entry_start + other["slot"] * 320,
+                         victim["id"])
+        expected = max(victim["slot"], other["slot"])
+        self.assert_stage11(self.run_diag(bytes(b)), expected, "duplicate-id")
+
+    def test_stage11_size_beyond_capacity_reports_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim = files[0]
+        size = victim["data_blocks"] * fixtures.BLOCK + 1
+        struct.pack_into("<Q", b, base + entry_start + victim["slot"] * 320 + 16,
+                         size)
+        self.assert_stage11(self.run_diag(bytes(b)), victim["slot"],
+                            "data-size")
+
+    def test_stage11_bad_parent_reports_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim = files[0]
+        struct.pack_into("<I", b, base + entry_start + victim["slot"] * 320 + 4,
+                         ID_BASE + 19)
+        self.assert_stage11(self.run_diag(bytes(b)), victim["slot"], "parent")
+
+    def test_stage11_bad_name_reports_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim = files[0]
+        # Embed a NUL inside the stored name: decode accepts it, the validator
+        # rejects strlen(name) != name_len.
+        b[base + entry_start + victim["slot"] * 320 + 41] = 0
+        self.assert_stage11(self.run_diag(bytes(b)), victim["slot"],
+                            "entry-name")
+
+    def test_stage11_tombstone_with_data_reports_reason(self):
+        b, base, _, entry_start, files = self.two_file_overlay()
+        victim = files[0]
+        # USED|TOMBSTONE with a live data run; the tombstone checks reject it.
+        struct.pack_into("<I", b, base + entry_start + victim["slot"] * 320 + 8,
+                         FLAG_USED | FLAG_TOMBSTONE)
+        self.assert_stage11(self.run_diag(bytes(b)), victim["slot"],
+                            "tombstone")
 
     def test_v2_backup_header_recovers(self):
         out = self.run_harness(self.image, "twofiles")

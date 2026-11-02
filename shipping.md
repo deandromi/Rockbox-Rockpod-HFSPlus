@@ -710,6 +710,7 @@ HFS+ overlay: READY
 Overlay stage: 9
 Overlay error: 0
 Overlay slot: -1
+Overlay reason: 0 none
 ```
 
 Then verify, in order:
@@ -850,6 +851,7 @@ Check overlay status first. The development failure occurred when normal create/
 | 7–8 | Entry read/validation failed; the slot identifies the record. |
 | 9, error 0 | Ready. |
 | 10 | Fresh-container initialization was attempted or failed. |
+| 11 | Whole-overlay validation failed; `Overlay slot` is the entry index (`-1` for a table-wide failure) and `Overlay reason` names the check. |
 
 Before any repair:
 
@@ -857,7 +859,7 @@ Before any repair:
 - do not delete it;
 - do not zero its header;
 - use the debug values and a read-only inspection to distinguish format corruption from storage damage;
-- preserve the decoded stage-8 fields (id, parent, flags, kind, name length, data start/blocks).
+- preserve the decoded stage-8 or stage-11 fields (id, parent, flags, kind, name length, data start/blocks) and the stage-11 reason.
 
 The documented development recovery cleared one invalid entry’s used flags while retaining the bitmap and other entries, and a write-range guard was added. That was specific to one damaged overlay; it is not a universal repair command.
 
@@ -899,7 +901,7 @@ Operational rules:
 
 | Gate | Method | Pass criteria | Evidence |
 |---|---|---|---|
-| Host reader tests | `make -C tools/hfsplus test` | API + 19 reader + 3 partition tests pass; native adapter either passes or is explicitly skipped | Terminal log |
+| Host reader tests | `make -C tools/hfsplus test` | API + 20 reader + 7 partition + 25 adapter tests pass; native adapter either passes or is explicitly skipped | Terminal log |
 | Reader sanitizers | ASan/UBSan with platform-correct flags | No ASan/UBSan reports | Terminal log |
 | Real HFS+ image | `hfsplus-inspect --scan` on macOS-created HFS+ and HFS+J images | `info`, `ls`, `cat` work | Commands + output |
 | Firmware build | configure + make + zip | `rockbox.elf` ARM, `rockbox.ipod` present, zip valid | `rockbox-info.txt`, hashes |
@@ -908,6 +910,7 @@ Operational rules:
 | Artifact hygiene | `unzip -l` | `.rockbox/rockbox.ipod` present; no `.DS_Store` | Zip listing |
 | Database tool | configure + sed + make | Native Mach-O executable; smoke test creates a valid `database_idx.tcd` | `file` output + smoke test |
 | Overlay consistency | Host fault/corruption harness | Entry ranges fully allocated, non-overlapping; no live file overwritten | **PASS in V1.1 (host)** |
+| Overlay diagnostics | Host adapter `diag` mode on corrupted images | Stage 11 reports the failing slot and reason name for range, ID, parent, name, size and tombstone failures | **PASS (host)** |
 | Overlay long names | Host adapter test with a 765-byte HFS+ name | No overflow; reject or bound to `FAT_DIRENTRY_NAME_MAX` | **PASS in V1.1 (host)** |
 | Directory rename namespace | Host adapter test: delete/create child, rename parent | Deleted child stays hidden; new child stays visible | **PASS in V1.1 (host)** |
 | Bootloader native fallback | Hide `/.rockbox` in overlay on a copy; boot | Bootloader still loads native `/.rockbox/rockbox.ipod` | **PASS in code (hardware boot test pending)** |

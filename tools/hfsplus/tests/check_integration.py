@@ -38,14 +38,25 @@ if sys.platform == "darwin":
         adapter = build / "adapter_host"
         run(cc + ["-std=gnu99", "-O1", "-g", "-Wall", "-Wextra",
                   "-Itools/hfsplus/tests/adapter/host/firmware/export",
-                  "-Ifirmware/hfsplus", "-Ifirmware/include",
+                  "-Ifirmware/export", "-Ifirmware/hfsplus", "-Ifirmware/include",
                   "tools/hfsplus/tests/adapter_host.c",
-                  "firmware/hfsplus/hfsplus_rb.c",
+                  "firmware/hfsplus/hfsplus_state.c",
+                  "firmware/hfsplus/hfsplus_diag.c",
+                  "firmware/hfsplus/hfsplus_io.c",
+                  "firmware/hfsplus/hfsplus_overlay_format.c",
+                  "firmware/hfsplus/hfsplus_overlay_alloc.c",
+                  "firmware/hfsplus/hfsplus_overlay_store.c",
+                  "firmware/hfsplus/hfsplus_time.c",
+                  "firmware/hfsplus/hfsplus_namespace.c",
+                  "firmware/hfsplus/hfsplus_overlay_validate.c",
+                  "firmware/hfsplus/hfsplus_overlay_load.c",
+                  "firmware/hfsplus/hfsplus_fat.c",
+                  "firmware/hfsplus/hfsplus_mount.c",
                   "firmware/hfsplus/hfsplus_ro.c",
                   "firmware/hfsplus/hfsplus_partition.c",
                   "-o", str(adapter)])
         run(["python3", str(tests / "test_adapter.py"), str(adapter)])
-        print("PASS: macOS host adapter (real hfsplus_rb/ro/partition)", flush=True)
+        print("PASS: macOS host adapter (real HFS+ modules/ro/partition)", flush=True)
     print("Host checks passed; no ARM link, emulator, or iPod boot was tested.")
     raise SystemExit(0)
 
@@ -61,7 +72,18 @@ with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
              "-DMEMORYSIZE=64", "-DTARGET_ID=71", "-Wno-format"]
     flags += ["-I" + str(d) for d in include_dirs]
     common = ["firmware/hfsplus/hfsplus_ro.c", "firmware/hfsplus/hfsplus_partition.c",
-              "firmware/hfsplus/hfsplus_rb.c", "firmware/common/fat.c",
+              "firmware/hfsplus/hfsplus_state.c", "firmware/hfsplus/hfsplus_diag.c",
+              "firmware/hfsplus/hfsplus_io.c",
+              "firmware/hfsplus/hfsplus_overlay_format.c",
+              "firmware/hfsplus/hfsplus_overlay_alloc.c",
+              "firmware/hfsplus/hfsplus_overlay_store.c",
+              "firmware/hfsplus/hfsplus_time.c",
+              "firmware/hfsplus/hfsplus_namespace.c",
+              "firmware/hfsplus/hfsplus_overlay_validate.c",
+              "firmware/hfsplus/hfsplus_overlay_load.c",
+              "firmware/hfsplus/hfsplus_fat.c",
+              "firmware/hfsplus/hfsplus_mount.c",
+              "firmware/common/fat.c",
               "firmware/common/disk.c", "firmware/common/file.c",
               "firmware/common/file_internal.c", "firmware/common/fileobj_mgr.c",
               "firmware/common/rb_namespace.c", "firmware/common/disk_cache.c"]
@@ -75,14 +97,15 @@ with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
         defs = ["-DBOOTLOADER"] if mode == "bootloader" else []
         sources = common + (["bootloader/ipod-s5l87xx.c"] if defs else [])
         run(cc + flags + defs + ["-fsyntax-only"] + sources)
-        objects = []
-        for i, source in enumerate(["firmware/hfsplus/hfsplus_rb.c", "tools/hfsplus/tests/rb_adapter.c"]):
-            obj = build / f"{mode}-{i}.o"
-            run(cc + flags + defs + san + ["-O1", "-g", "-c", source, "-o", str(obj)])
-            objects.append(str(obj))
+        adapter_obj = build / f"{mode}-adapter.o"
+        run(cc + flags + defs + san + ["-O1", "-g", "-c",
+            "tools/hfsplus/tests/rb_adapter.c", "-o", str(adapter_obj)])
+        hfsplus_sources = [s for s in common
+                           if s.startswith("firmware/hfsplus/")]
         binary = build / ("rb-test-" + mode)
-        run(cc + ["-std=c99", "-O1", "-g"] + san + objects +
-            [str(tests / "rb_runner.c")] + common[:2] + link + ["-o", str(binary)])
+        run(cc + ["-std=c99", "-O1", "-g"] + san + [str(adapter_obj)] +
+            [str(tests / "rb_runner.c")] + hfsplus_sources + link +
+            ["-o", str(binary)])
         binaries.append(str(binary))
         print(f"PASS: {mode} host syntax and adapter compilation", flush=True)
     inspect = build / "hfsplus-inspect"

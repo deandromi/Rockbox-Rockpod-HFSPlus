@@ -1,10 +1,35 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef HFSPLUS_RB_H
 #define HFSPLUS_RB_H
-#include "fat.h"
-#include "disk.h"
+/* Angle-bracket includes are deliberate: the host adapter harness puts stub
+ * fat.h/disk.h earlier on the include path, while firmware resolves them from
+ * firmware/export.  This keeps one API header instead of a host copy. */
+#include <fat.h>
+#include <disk.h>
 
 #define HFSPLUS_NOT_HFS (-100)
+
+/* Why overlay_validate() rejected a persistent overlay (stage 11).  The
+ * numeric values are part of the debug/API surface; append new reasons at the
+ * end and keep tools/rockpod/overlay_check.py messages in sync. */
+enum hfs_overlay_reason {
+    HFS_OVL_REASON_NONE = 0,
+    HFS_OVL_REASON_LAYOUT,
+    HFS_OVL_REASON_ENTRY_ID,
+    HFS_OVL_REASON_DUPLICATE_ID,
+    HFS_OVL_REASON_ENTRY_NAME,
+    HFS_OVL_REASON_ENTRY_FLAGS,
+    HFS_OVL_REASON_ENTRY_KIND,
+    HFS_OVL_REASON_TOMBSTONE,
+    HFS_OVL_REASON_BASE_ID,
+    HFS_OVL_REASON_DATA_RANGE,
+    HFS_OVL_REASON_DATA_SIZE,
+    HFS_OVL_REASON_DATA_UNALLOCATED,
+    HFS_OVL_REASON_DATA_OVERLAP,
+    HFS_OVL_REASON_PARENT,
+    HFS_OVL_REASON_NEXT_ID,
+};
+
 void hfsplus_init(void);
 bool hfsplus_mounted(int volume);
 int hfsplus_mount(int volume, int drive, sector_t start, sector_t count);
@@ -20,9 +45,12 @@ bool hfsplus_overlay_ready(int volume);
 int hfsplus_overlay_last_error(void);
 int hfsplus_overlay_last_stage(void);
 int hfsplus_overlay_last_slot(void);
+int hfsplus_overlay_last_reason(void);
+const char *hfsplus_overlay_reason_name(int reason);
 int hfsplus_overlay_last_error_vol(int volume);
 int hfsplus_overlay_last_stage_vol(int volume);
 int hfsplus_overlay_last_slot_vol(int volume);
+int hfsplus_overlay_last_reason_vol(int volume);
 uint32_t hfsplus_overlay_diag_id(void);
 uint32_t hfsplus_overlay_diag_parent(void);
 uint32_t hfsplus_overlay_diag_flags(void);

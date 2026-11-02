@@ -31,6 +31,31 @@ The following findings were fixed in the V1.1 maintenance branch and are marked 
 
 Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
+## Post-V2.1.1 (unreleased)
+
+Stage 11 no longer reports only `-2`, slot `-1`; the adapter is also decomposed.
+
+- `overlay_validate()` now returns a `struct hfs_overlay_validation`
+  (reason + failing slot) from `hfsplus_overlay_validate.c`; the loader applies
+  it to diagnostics. The old 2,797-line `hfsplus_rb.c` is gone, replaced by
+  focused I/O, format, allocation, store, loader, namespace, FAT, mount, state,
+  diagnostics and time modules.
+- Debug → Disk Info shows `Overlay reason: <n> <name>` and the failing entry
+  fields (id, parent, flags, kind/name length, data range).
+- The host adapter harness has a `diag` mode; 25 adapter tests now run,
+  including seven that assert stage-11 reason/slot pairs.
+- Overlay visibility reads now go through one `overlay_entry_visible()`
+  predicate; the validator still computes the legacy shadow set.
+- `write_container_inline()` trusts the stage-2 container validation instead of
+  rereading the native allocation bitmap on every overlay write. This removes
+  read amplification from the write path; native in-place writes still validate.
+- No on-disk format change: v1 and v2 overlays remain readable, and no
+  existing reason or field is renumbered.
+- Host verification: 20 reader + 7 partition + 25 adapter tests, including
+  ASan/UBSan on macOS. Firmware, Thumb bootloader and `rockbox.zip` build.
+- Efficiency audit and remaining power work:
+  [`docs/efficiency.md`](docs/efficiency.md).
+
 ## V2.1.1 hotfix
 
 V2.1.1 fixes the remaining legacy overlay compatibility case found on hardware: an old shadow entry stored a native `base_id` without the `HFS_OVL_BASE` flag. V2.0/V2.1 rejected it at overlay stage 11 (`-2`).
@@ -65,18 +90,18 @@ HFS-042/099 (logical extent reordering without a checksum), HFS-044 (Unicode nor
 
 V2.0 host verification: 19 reader + 7 partition + 15 adapter tests; the full reader/partition/adapter suite passes under ASan/UBSan; macOS `check_integration.py` host-adapter mode passes; firmware, Thumb bootloader, database host tool, `mks5lboot`, DFU and `rockbox.zip` build. Release hashes are in `docs/release-v2.0.md`. V1.1 was installed and booted on the tested iPod; V2.0 itself was host/build-verified in this pass, and the controlled theme/clean-reboot check remains the hardware acceptance test.
 
-## 0. Immediate blockers (fix before any autonomous device install)
+## 0. Historical immediate blockers (all fixed)
 
 | ID | Status | Why it blocks | Required fix | Required test |
 |---|---|---|---|---|
-| HFS-001 | OPEN | Overlay mounts READY while live entries are absent from the bitmap; allocator reuses live blocks and overwrites files. Reproduced: 5,000/5,000 bytes overwritten. | Add `overlay_validate()`: every used entry range inside the data area, fully marked used, non-overlapping, `size <= data_blocks*4096`, unique IDs, valid parents. On failure, keep the volume read-only and report the stage/slot. Never reinitialize automatically. | Host harness: corrupt bitmap/entry range, remount, verify overlay refuses; create/write must not touch the live file. |
-| HFS-002 | OPEN | Realloc/shrink/remove free blocks before the new entry state is durable. Fault injection produced a dangling entry and a 5,000-byte overwrite after remount. | Persist new entry/backing run **before** freeing old blocks; persist smaller/cleared entry before freeing tail; add `storage_flush()` at commit boundaries; use a WAL/intent record or checksummed double-buffer for the format. | Fault injection at every write in realloc/shrink/remove/close: power-loss model must remount to either old or new complete state, never overlap. |
-| HFS-003 | OPEN | Base-file long name causes an ASan stack-buffer-overflow in `hfsplus_closewrite()` (`strcpy` at `hfsplus_rb.c:1203`). | Reject names > `FAT_DIRENTRY_NAME_MAX` at open/create/rename/shadow; use `strlcpy` for every `fat_direntry` fill; never copy an unbounded HFS+ name. | ASan host test with 255-, 256-, 765- and 1,020-byte names through open/close/readdir. |
-| HFS-004 | OPEN | Renaming a base directory orphans overlay children/tombstones: deleted children reappear, new overlay children disappear. | Introduce a stable logical-parent mapping (base CNID ↔ overlay ID) used by readdir/open/remove/rename, or migrate every child entry when a base directory is shadowed. Do not patch only readdir. | Host test: delete child, rename parent; create child, rename parent; move parent; reopen after remount. |
-| HFS-112 | OPEN | PictureFlow on-device index rebuild underflows `bufsz` before `strcpy`, causing a heap/buffer overflow when the index buffer is nearly full. | Check `*bufsz >= data_size` before subtracting; validate every remaining-space calculation; return `ERROR_BUFFER_FULL` cleanly. | Host/simulation test with an undersized index buffer and many artists/albums; ASan. |
-| HFS-114 | OPEN | `create_album_index()` treats the `<Untagged>` album’s name-pool byte offset as an album count; pointer shift and `uint16_t` count underflow can make qsort walk outside the buffer. | Track untagged albums by count/index separately from `name_idx`; remove them with an explicit stable representation; add bounds checks before every pointer/count adjustment. | Host/simulation test with named + `<Untagged>` albums at different name-pool offsets; verify album count/pointer and ASan. |
+| HFS-001 | FIXED | Overlay mounts READY while live entries are absent from the bitmap; allocator reuses live blocks and overwrites files. Reproduced: 5,000/5,000 bytes overwritten. | Add `overlay_validate()`: every used entry range inside the data area, fully marked used, non-overlapping, `size <= data_blocks*4096`, unique IDs, valid parents. On failure, keep the volume read-only and report the stage/slot. Never reinitialize automatically. | Host harness: corrupt bitmap/entry range, remount, verify overlay refuses; create/write must not touch the live file. |
+| HFS-002 | FIXED | Realloc/shrink/remove free blocks before the new entry state is durable. Fault injection produced a dangling entry and a 5,000-byte overwrite after remount. | Persist new entry/backing run **before** freeing old blocks; persist smaller/cleared entry before freeing tail; add `storage_flush()` at commit boundaries; use a WAL/intent record or checksummed double-buffer for the format. | Fault injection at every write in realloc/shrink/remove/close: power-loss model must remount to either old or new complete state, never overlap. |
+| HFS-003 | FIXED | Base-file long name causes an ASan stack-buffer-overflow in `hfsplus_closewrite()` (`strcpy` at `hfsplus_rb.c:1203`). | Reject names > `FAT_DIRENTRY_NAME_MAX` at open/create/rename/shadow; use `strlcpy` for every `fat_direntry` fill; never copy an unbounded HFS+ name. | ASan host test with 255-, 256-, 765- and 1,020-byte names through open/close/readdir. |
+| HFS-004 | FIXED | Renaming a base directory orphans overlay children/tombstones: deleted children reappear, new overlay children disappear. | Introduce a stable logical-parent mapping (base CNID ↔ overlay ID) used by readdir/open/remove/rename, or migrate every child entry when a base directory is shadowed. Do not patch only readdir. | Host test: delete child, rename parent; create child, rename parent; move parent; reopen after remount. |
+| HFS-112 | FIXED | PictureFlow on-device index rebuild underflows `bufsz` before `strcpy`, causing a heap/buffer overflow when the index buffer is nearly full. | Check `*bufsz >= data_size` before subtracting; validate every remaining-space calculation; return `ERROR_BUFFER_FULL` cleanly. | Host/simulation test with an undersized index buffer and many artists/albums; ASan. |
+| HFS-114 | FIXED | `create_album_index()` treats the `<Untagged>` album’s name-pool byte offset as an album count; pointer shift and `uint16_t` count underflow can make qsort walk outside the buffer. | Track untagged albums by count/index separately from `name_idx`; remove them with an explicit stable representation; add bounds checks before every pointer/count adjustment. | Host/simulation test with named + `<Untagged>` albums at different name-pool offsets; verify album count/pointer and ASan. |
 
-**No autonomous install while any S0 item is open.**
+All S0/S1 findings are fixed. Device installs still require the normal backup, artifact-manifest and DFU gates in `shipping.md`.
 
 ## 1. Overlay crash consistency and format hardening
 

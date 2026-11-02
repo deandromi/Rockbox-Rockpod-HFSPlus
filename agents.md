@@ -17,7 +17,7 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 5. **Never format, restore, erase or repartition a device to “fix” a software error.** Diagnose mount errors, overlay stages and DFU failures without wiping.
 6. **A missing or invalid overlay disables writes.** The adapter keeps the native namespace readable for diagnostics but does not fall back to native writes (`force_readonly`).
 7. **Keep HFS+ policy in the HFS+ layer.** Do not add feature checks to generic FAT code when an adapter capability hook exists.
-8. **Do not grow `firmware/hfsplus/hfsplus_rb.c` further.** It is now ~2,800 lines and mixes I/O, overlay format, allocation, persistence, namespace merge, FAT adaptation and diagnostics. Decompose before adding features. See §8.
+8. **Keep the adapter decomposed.** The old `firmware/hfsplus/hfsplus_rb.c` monolith has been split by responsibility (I/O, format, allocation, store, namespace, FAT, mount, diagnostics). Put new behavior in the owning module; do not recreate a shared mega-file. See §8 and `docs/efficiency.md`.
 9. **Do not claim hardware verification without a recorded device run.** Host tests and ARM links are not device tests.
 10. **Ask before destructive device operations.** Backups, disk-mode state and recovery paths must be verified first.
 
@@ -238,9 +238,9 @@ python3 tools/hfsplus/tests/check_integration.py
 
 Current expected result:
 
-- 19 reader tests.
+- 20 reader tests.
 - 7 partition tests.
-- 17 adapter tests (including fault injection and legacy overlay shapes).
+- 25 adapter tests (including fault injection, legacy overlay shapes and stage-11 reason/slot diagnostics).
 - ASan/UBSan passes on macOS.
 - macOS host integration mode passes.
 - Firmware, Thumb bootloader, database host tool, `mks5lboot`, DFU and `rockbox.zip` build.
@@ -269,11 +269,16 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
 
 ## 7. Diagnostics
 
-- Healthy overlay: `READY`, stage 9, error 0, slot -1.
+- Healthy overlay: `READY`, stage 9, error 0, slot -1, reason 0 (`none`).
 - Stage 2: container/extent/allocation validation.
 - Stages 3–6: header/bitmap.
 - Stages 7–8: entry table/decode; slot identifies the record.
-- Stage 11: whole-overlay validation; currently no slot detail.
+- Stage 11: whole-overlay validation; slot identifies the failing entry and
+  reason identifies the check. `-1`/`layout` or `-1`/`next-id` are whole-table
+  failures. The debug screen also shows the failing entry fields.
+- Stage 11 reasons: 0 none, 1 layout, 2 entry-id, 3 duplicate-id, 4 entry-name,
+  5 entry-flags, 6 entry-kind, 7 tombstone, 8 base-id, 9 data-range,
+  10 data-size, 11 data-unallocated, 12 data-overlap, 13 parent, 14 next-id.
 - `-4`: native HFS+ dirty/inconsistent/journal replay required.
 - `diskutil verifyVolume` checks native HFS+ only, not overlay internals.
 - Do not use Rockbox USB mode for transfers; use Apple Disk Mode.
@@ -282,22 +287,24 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
 
 ## 8. Thermo-nuclear code-quality review (V2.1.1)
 
+Post-V2.1.1 decomposition status is annotated inline. The original findings are
+retained so the review history is not lost.
+
 Prioritized structural findings. These are maintainability blockers, not cosmetic nits.
 
-1. **`hfsplus_rb.c` is ~2,800 lines and still growing.** It mixes I/O bouncing, v1/v2 overlay format, allocation, persistence, namespace merge, FAT adaptation and diagnostics. Decompose before any new feature:
-   `hfsplus_io.c`, `hfsplus_overlay_format.c`, `hfsplus_overlay_alloc.c`, `hfsplus_overlay_store.c`, `hfsplus_namespace.c`, `hfsplus_fat.c`, `hfsplus_diag.c`.
-2. **`shadowed[]` is a second source of truth.** Visibility is enforced in validation, rebuild, hides-base, tombstone, create, file lookup and readdir. One missed check reintroduces a duplicate-name bug. Define one `overlay_entry_visible()` predicate (or a resolved-entry table) and use it everywhere.
+1. **Monolith removed (resolved post-V2.1.1).** `hfsplus_rb.c` no longer exists. The adapter is split into `hfsplus_io.c`, `hfsplus_overlay_format.c`, `hfsplus_overlay_alloc.c`, `hfsplus_overlay_store.c`, `hfsplus_overlay_validate.c`, `hfsplus_overlay_load.c`, `hfsplus_namespace.c`, `hfsplus_fat.c`, `hfsplus_mount.c`, `hfsplus_state.c`, `hfsplus_diag.c` and `hfsplus_time.c`. Keep new behavior in the owning module.
+2. **`shadowed[]` is still a second source of truth, but reads are centralized.** Every visibility read now goes through `overlay_entry_visible()`; the validator still computes the shadow set. A resolved-entry table (or an explicit entry mode) would remove the remaining write-side coupling.
 3. **Legacy compatibility is ad-hoc.** Duplicate names, duplicate BASE/tombstone, and `base_id` without `BASE` are handled by separate conditionals in validation. Introduce an explicit entry mode (`FILE`, `BASE`, `TOMBSTONE`, `LEGACY_BASE`) resolved once at load. This deletes condition chains rather than centralizing them.
-4. **Stage 11 cannot say why it failed.** The overlay was rejected with `-2`, slot `-1`; the actual cause required reverse-engineering with Python. `overlay_validate()` should return a reason code and failing slot, and the debug screen should show them.
+4. **Stage 11 diagnostics were opaque (resolved after V2.1.1).** The overlay used to be rejected with `-2`, slot `-1`, so the actual cause required reverse-engineering with Python. `overlay_validate()` now returns a `struct hfs_overlay_validation` with a reason and failing slot; `overlay_load()` applies it to diagnostics, and the debug screen shows both plus the failing entry fields. Extend the enum and the host reason/slot tests together; do not renumber existing values.
 5. **The C validator and `tools/rockpod/overlay_check.py` are independent implementations.** They diverged on `base_id`/`BASE`, causing the V2.1.1 bug. Add a shared fixture corpus and run both validators against the same images, or make the Python tool consume a C-generated manifest.
-6. **v1/v2 format branches are spread across header parse, sync, bitmap offsets and backup offsets.** A small `overlay_format` driver (`bitmap_start`, `backup_offset`, `parse`, `write`) would remove the conditional matrix.
-7. **`overlay_load()` is a 190-line monolith** mixing lookup, format selection, backup recovery, fresh initialization, chunked entry reads, validation and index rebuild. Split loader phases from format parsing.
-8. **`#ifdef BOOTLOADER` lives inside `hfsplus_mount()`.** The bootloader path (native-only, no index, no overlay) should be its own mount function; conditional branches inside a large function hide two different lifecycles.
+6. **v1/v2 format branches now live in one module (resolved post-V2.1.1).** `hfsplus_overlay_format.c` owns header parse/sync, bitmap/backup offsets and entry serialization. Any future format version belongs there.
+7. **`overlay_load()` is isolated (resolved post-V2.1.1).** It is now a separate `hfsplus_overlay_load.c` rather than part of a 2,600-line file. It still runs several phases; split further only with loader tests.
+8. **Bootloader lifecycle is separated (resolved post-V2.1.1).** `hfsplus_mount_indexes()` and `hfsplus_mount_overlay()` own the firmware/bootloader differences; `hfsplus_mount()` no longer contains `#ifdef BOOTLOADER` in its main flow.
 9. **Endian/bounds helpers are duplicated** across `hfsplus_ro.c`, `hfsplus_partition.c` and the adapter. Use one checked-arithmetic/endian utility header.
 10. **The write capability model is historical.** `fat_is_readonly()` lies by name, while `hfsplus_writable()`/`hfsplus_can_write_existing()` express the real policy. Replace with one explicit write-mode/capability query.
 11. **`overlay_validate()` uses O(n²) duplicate checks and branch-heavy nesting.** With 2,048 entries this is tolerable, but a two-pass key/winner resolution would be simpler and faster.
 12. **The host adapter is one large test file.** Split fixtures, storage stubs and scenario tests; add a regression fixture for the real legacy overlay shape (`base_id` without `BASE`).
-13. **The bootloader still compiles unused `overlay_load()` code.** Wrap it out of `BOOTLOADER` builds to reduce size and remove the warning.
+13. **Bootloader no longer compiles the overlay loader (resolved post-V2.1.1).** `hfsplus_overlay_load.c` is wrapped out of `BOOTLOADER` builds, and the unused-function warning is gone.
 14. **Docs drift is a real defect.** This file and README previously described v1-only overlays, no checksums and 4,096-entry indexes after the code changed. Keep docs and tests updated with format changes.
 
 What is already good:
@@ -388,7 +395,19 @@ Hard stops:
 |---|---|
 | `firmware/hfsplus/hfsplus_ro.{c,h}` | Read-only HFS+ reader |
 | `firmware/hfsplus/hfsplus_partition.{c,h}` | Partition scanner |
-| `firmware/hfsplus/hfsplus_rb.c` | FAT adapter + overlay (decompose) |
+| `firmware/hfsplus/hfsplus_overlay.h` | Internal overlay layout/result contract |
+| `firmware/hfsplus/hfsplus_overlay_validate.c` | Whole-overlay validator (stage 11) |
+| `firmware/hfsplus/hfsplus_overlay_load.c` | Overlay loader/recovery (empty in bootloader) |
+| `firmware/hfsplus/hfsplus_overlay_format.c` | v1/v2 on-disk format and container I/O |
+| `firmware/hfsplus/hfsplus_overlay_alloc.c` | Bitmap, runs, growth and materialization |
+| `firmware/hfsplus/hfsplus_overlay_store.c` | Entry lifecycle, IDs and hash indexes |
+| `firmware/hfsplus/hfsplus_namespace.c` | Native+overlay namespace merge |
+| `firmware/hfsplus/hfsplus_fat.c` | FAT/VFS adapter boundary |
+| `firmware/hfsplus/hfsplus_mount.c` | Partition scan and mount lifecycle |
+| `firmware/hfsplus/hfsplus_io.c` | Sector I/O and inline writes |
+| `firmware/hfsplus/hfsplus_state.{c,h}` | Per-volume adapter state |
+| `firmware/hfsplus/hfsplus_diag.{c,h}` | Stage/reason diagnostics |
+| `firmware/hfsplus/hfsplus_time.{c,h}` | HFS+/FAT timestamp conversion |
 | `firmware/export/hfsplus_rb.h` | Adapter API |
 | `firmware/export/fat.h` | HFS+ fields in FAT structs |
 | `firmware/common/{disk,fat,file,file_internal}.c` | Integration |
@@ -408,6 +427,7 @@ Hard stops:
 | `README.md` | User install/usage |
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
+| `docs/efficiency.md` | Disk/CPU power audit and measurement checklist |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
 
 ### 11.1 Optional semantic index

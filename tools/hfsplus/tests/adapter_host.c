@@ -416,6 +416,21 @@ static int test_fault(void)
     return 0;
 }
 
+static int test_diag(void)
+{
+    int rc = mount_image();
+    int reason = hfsplus_overlay_last_reason();
+    printf("mount=%d ready=%d stage=%d error=%d slot=%d reason=%d "
+           "reason_name=%s id=%08lx\n",
+           rc, hfsplus_overlay_ready(0) ? 1 : 0,
+           hfsplus_overlay_last_stage(), hfsplus_overlay_last_error(),
+           hfsplus_overlay_last_slot(), reason,
+           hfsplus_overlay_reason_name(reason),
+           (unsigned long)hfsplus_overlay_diag_id());
+    hfsplus_unmount(0);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *test;
@@ -442,6 +457,7 @@ int main(int argc, char **argv)
     else if (!strcmp(test, "legacy-duplicate")) rc = test_legacy_duplicate();
     else if (!strcmp(test, "legacy-baseid")) rc = test_legacy_baseid();
     else if (!strcmp(test, "fault")) rc = test_fault();
+    else if (!strcmp(test, "diag")) rc = test_diag();
     else { fprintf(stderr, "unknown test\n"); return 2; }
     if (save_image(argv[2]))
         return 2;
