@@ -85,8 +85,6 @@ static long ssd_wake_tick;
 static bool ata_force_sleep;
 /* Writes happened since the last successful flush. */
 static bool ata_cache_dirty;
-/* Last time the zero-timeout idle notification was posted. */
-static long ata_idle_notify_tick;
 static struct semaphore mmc_wakeup;
 static struct semaphore mmc_comp_wakeup;
 #ifdef HAVE_ATA_DMA
@@ -1286,7 +1284,6 @@ int ata_init(void)
     ssd_wake_tick = 0;
     ata_force_sleep = false;
     ata_cache_dirty = false;
-    ata_idle_notify_tick = 0;
     ssd_sleep_tick = 0;
     total_sectors = 0;
 
@@ -1464,14 +1461,6 @@ int ata_event(long id, intptr_t data)
             }
 
             STG_EVENT_ASSERT_ACTIVE(STORAGE_ATA);
-
-            if (ata_powered && !allow_sleep
-                && TIME_AFTER(current_tick, ata_last_activity_value + 3 * HZ)
-                && TIME_AFTER(current_tick, ata_idle_notify_tick + 5 * HZ))
-            {
-                ata_idle_notify_tick = current_tick;
-                storage_post_event(Q_STORAGE_IDLE_NOTIFY, 0);
-            }
         }
         else if (explicit_sleep)
         {

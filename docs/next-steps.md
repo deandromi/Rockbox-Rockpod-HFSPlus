@@ -1,10 +1,10 @@
 # Next steps — V2.1.1 and later
 
-Status: V3.2 Beta “Thermo-Nuclear” experimental build from the V3.0/V2.1.1
+Status: V3.2 Beta 2 “Thermo-Nuclear” experimental build from the V3.0/V2.1.1
 baseline. The adapter is decomposed, the v3 overlay format and persistent index
 cache are implemented, and the read-only USB path is hardware-tested. This beta
 adds the P0/P1 efficiency portfolio; P0 hardware gates and device power/resume
-tests are not executed. See `release-v3.2-beta.md` and `v3.2-validation.md`.
+tests are not executed. See `release-v3.2-beta2.md` and `v3.2-validation.md`.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 
@@ -112,22 +112,27 @@ Implemented in V3.2 Beta (host/build only; device gates pending):
 - Application multipliers: persistent filename lookup, album-art directory
   cache, tagcache fill without dircache, browser cursor, playback/viewer
   reductions.
-- Zero-spindown idle notifications, deduplicated PRE_WAKE, async SSD pre-wake,
-  backlight/lineout write caches, ATA flush error propagation.
+- Deduplicated PRE_WAKE, async SSD pre-wake, backlight/lineout write
+  caches, ATA flush error propagation. The Beta 1 zero-spindown idle-notify
+  path was removed in Beta 2 after a 4–6 s post-boot freeze on iFlash SD.
 - 4 KiB read-only stream read-ahead, 16 KiB overlay copies, v3 parent-bucket
   readdir, high-water validator/load bounds, bootloader minimal state, and an
   adapter read-only name/path cache.
 
 Still open, in priority order:
 
-1. Physical P0 power-loss matrix, native-integrity check and 100-cycle
+1. Redesign zero-spindown idle notifications without an early-boot periodic
+   callback, then measure them.
+2. Investigate the Beta 2 reports of slow boot, unreliable directory loading,
+   scroll-wheel ghosting and a Cover Flow launch freeze.
+3. Physical P0 power-loss matrix, native-integrity check and 100-cycle
    SSD/spindown resume test.
-2. Existing v2 containers do not get the v3 cache without a migration tool.
-3. ATA flush batching still needs a WAL/commit-group design and the hardware
+4. Existing v2 containers do not get the v3 cache without a migration tool.
+5. ATA flush batching still needs a WAL/commit-group design and the hardware
    power-loss matrix.
-4. Full duplicate-name resolution is still O(U²); v1/v2 readdir keeps the
+6. Full duplicate-name resolution is still O(U²); v1/v2 readdir keeps the
    bounded linear fallback.
-5. Release-packaging and measurement items in `efficiency-paper.md` §7–§9.
+7. Release-packaging and measurement items in `efficiency-paper.md` §7–§9.
 
 Do not trade crash consistency for power without the hardware matrix.
 

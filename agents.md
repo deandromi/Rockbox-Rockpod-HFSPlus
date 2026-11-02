@@ -3,8 +3,8 @@
 Status: reviewed 2026-11-02 for V3.0.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Public stable release identity: **V3.0 // Version V13.0**.
-Current build line: `docs/VERSION` is `3.2.0-beta-v13.0` (V3.2 Beta).
-Current test build: **V3.2 Beta — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
+Current build line: `docs/VERSION` is `3.2.0-beta2-v13.0` (V3.2 Beta 2).
+Current test build: **V3.2 Beta 2 — “Thermo-Nuclear”** (experimental, P0 hardware-unverified).
 Next stable release: **TBD**.
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
@@ -34,12 +34,12 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 - Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
   final release unless the owner explicitly names a beta.
 - Current stable: **V3.0 // Version V13.0**.
-- Current owner-named experimental beta: **V3.2 Beta — “Thermo-Nuclear”**.
+- Current owner-named experimental beta: **V3.2 Beta 2 — “Thermo-Nuclear”**.
 - The previously drafted V3.1 “Nuclear and Readable” stable name is deferred;
   V3.1 stable was not released.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. A local commit,
-  build or draft is not permission to publish. **V3.2 Beta “Thermo-Nuclear” is
+  build or draft is not permission to publish. **V3.2 Beta 2 “Thermo-Nuclear” is
   owner-approved for publication with the P0 hardware gates recorded as not
   run.**
 
@@ -319,11 +319,12 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
   10 data-size, 11 data-unallocated, 12 data-overlap, 13 parent, 14 next-id.
 - `-4`: native HFS+ dirty/inconsistent/journal replay required.
 - `diskutil verifyVolume` checks native HFS+ only, not overlay internals.
-- With the default `disk_spindown = 0`, the ATA event still asserts storage
-  active (no automatic standby), but `Q_STORAGE_IDLE_NOTIFY` now runs the
-  deferred storage-idle callbacks at their normal 30 s cadence. The old
-  "callbacks only run at forced points" timing issue is addressed; the power
-  cost of the periodic notify is not measured on hardware.
+- With the default `disk_spindown = 0`, the ATA event asserts storage active
+  (no automatic standby) and deferred storage-idle callbacks stay deferred
+  until a forced flush point, as in V3.1. The V3.2 Beta 1 attempt to run them
+  periodically via `Q_STORAGE_IDLE_NOTIFY` caused a 4–6 s post-boot freeze on
+  an iFlash SD and was removed in Beta 2. Any replacement needs a safe,
+  measured design; do not reintroduce a periodic early-boot callback.
 - Rockbox USB mass storage is read-only on HFS+ firmware builds. Host writes
   return SCSI DATA PROTECT; use Apple Disk Mode for changes. The read-only LUN
   is safe for copying files off and reading `/.rockpod-rw` for diagnostics.
@@ -480,7 +481,8 @@ Hard stops:
 | `docs/efficiency-paper.md` | Repository-wide efficiency paper (custom HFS+, inherited Rockbox, build/tooling, non-code) |
 | `docs/release-v3.0.md` | V3.0 release notes and hashes |
 | `docs/release-v3.1.md` | Draft V3.1 “Nuclear and Readable” release note (not released) |
-| `docs/release-v3.2-beta.md` | V3.2 Beta release notes, warnings and hashes |
+| `docs/release-v3.2-beta.md` | V3.2 Beta 1 release notes, warnings and hashes |
+| `docs/release-v3.2-beta2.md` | V3.2 Beta 2 release notes, freeze fix and hashes |
 | `docs/v3.2-validation.md` | V3.2 host/build evidence and unexecuted device gates |
 | `docs/v3.2-review.md` | V3.2 thermo-nuclear code-quality review |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |

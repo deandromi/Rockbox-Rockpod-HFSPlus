@@ -56,11 +56,6 @@ enum
     Q_STORAGE_SLEEP,
     Q_STORAGE_SLEEPNOW,
     Q_STORAGE_PRE_WAKE,
-    /* Driver asked the storage thread to run the deferred storage-idle
-     * callbacks without granting a sleep.  Used by targets that keep the
-     * storage permanently active (spindown disabled) but still need the
-     * settings/status callbacks to make progress. */
-    Q_STORAGE_IDLE_NOTIFY,
 #ifdef STORAGE_CLOSE
     Q_STORAGE_CLOSE,
 #endif

@@ -2,7 +2,7 @@
 
 **V3.0 // Version V13.0 and V2.0-Final**
 
-**Current test build: V3.2 Beta — “Thermo-Nuclear” (experimental, not stable).**
+**Current test build: V3.2 Beta 2 — “Thermo-Nuclear” (experimental, not stable).**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
@@ -27,7 +27,7 @@ Please make a decision between picking either: the newer post V2 releases or the
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
 | Release | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
-| Current beta | V3.2 Beta — “Thermo-Nuclear” (experimental, P0 hardware-unverified) |
+| Current beta | V3.2 Beta 2 — “Thermo-Nuclear” (experimental, P0 hardware-unverified) |
 
 V3.0 decomposes the adapter, introduces the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3 and up requires a new v3 overlay if you haven't installed one already or currently have a V1/2 or V2-Final overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
 

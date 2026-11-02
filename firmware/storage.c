@@ -185,15 +185,6 @@ static void NORETURN_ATTR storage_thread(void)
             }
             break;
 
-        case Q_STORAGE_IDLE_NOTIFY:
-            /* The driver keeps storage active but wants the deferred
-             * idle callbacks to run.  call_storage_idle_notifys() applies
-             * its own 30 s lock, so a driver may post this periodically. */
-            if (!usb_mode) {
-                call_storage_idle_notifys(false);
-            }
-            break;
-
 #ifdef HAVE_HOTSWAP_IN_THREAD
         case Q_STORAGE_MEDIUM_INSERTED:
         case Q_STORAGE_MEDIUM_REMOVED:

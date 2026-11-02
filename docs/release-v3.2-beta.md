@@ -5,6 +5,10 @@ Public version string: `3.2.0-beta-v13.0`
 Status: **experimental beta**. Not a stable release.
 Stable release remains **V3.0 // Version V13.0**.
 
+> **Superseded by V3.2 Beta 2.** Beta 1 froze 4–6 seconds after boot on an
+> iFlash SD because of the periodic storage idle-notify path. Beta 2 removes
+> that path. See [`release-v3.2-beta2.md`](release-v3.2-beta2.md).
+
 ## Update type
 
 **Both firmware and bootloader.** This release contains:
