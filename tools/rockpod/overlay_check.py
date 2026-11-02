@@ -32,6 +32,15 @@ def _header_sum(raw: bytes) -> int:
     return (~value) & 0xffffffff
 
 
+def _header_sum_v3(raw: bytes) -> int:
+    value = 0
+    for i, byte in enumerate(raw[:64]):
+        if 40 <= i < 44:
+            continue
+        value = ((value << 8) ^ (value + byte)) & 0xffffffff
+    return (~value) & 0xffffffff
+
+
 def parse(path: Path):
     file_size = path.stat().st_size
     with path.open("rb") as f:
@@ -43,6 +52,8 @@ def parse(path: Path):
             version = 2
         elif magic == b"RPOVL11\0":
             version = 1
+        elif magic == b"RPOVL13\0":
+            version = 3
         else:
             raise OverlayError(f"unknown overlay magic {magic!r}")
         block, count, total, bitmap_bytes, data_start, next_id, generation = \
@@ -50,14 +61,25 @@ def parse(path: Path):
         if block != BLOCK or count != MAX_ENTRIES:
             raise OverlayError("unsupported overlay layout")
         stored = struct.unpack_from("<I", header, 40)[0]
-        if (version == 2 and not stored) or (stored and stored != _header_sum(header)):
+        if version == 3:
+            if not stored or stored != _header_sum_v3(header):
+                raise OverlayError("overlay v3 header checksum mismatch")
+        elif (version == 2 and not stored) or (
+                stored and stored != _header_sum(header)):
             raise OverlayError("overlay header checksum mismatch")
         if total * BLOCK > file_size:
             raise OverlayError("overlay header exceeds file size")
         bitmap_start = 1 if version == 1 else 2
         bitmap_blocks = (bitmap_bytes + BLOCK - 1) // BLOCK
         entry_blocks = (MAX_ENTRIES * ENTRY_SIZE + BLOCK - 1) // BLOCK
-        expected = bitmap_start + bitmap_blocks + entry_blocks
+        cache_blocks = 0
+        if version == 3:
+            high_water, cache_start, cache_blocks, state = \
+                struct.unpack_from("<4I", header, 44)
+            if (cache_blocks != 64 or high_water > MAX_ENTRIES or state > 1 or
+                    cache_start != bitmap_start + bitmap_blocks + entry_blocks):
+                raise OverlayError("overlay v3 cache/header fields are inconsistent")
+        expected = bitmap_start + bitmap_blocks + entry_blocks + cache_blocks
         if data_start != expected or data_start >= total:
             raise OverlayError("overlay data start is inconsistent")
         f.seek(bitmap_start * BLOCK)
