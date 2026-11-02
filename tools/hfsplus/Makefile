@@ -19,6 +19,7 @@ ADAPTER_SOURCES = tests/adapter_host.c ../../firmware/hfsplus/hfsplus_state.c \
                   ../../firmware/hfsplus/hfsplus_overlay_load.c \
                   ../../firmware/hfsplus/hfsplus_namespace.c \
                   ../../firmware/hfsplus/hfsplus_fat.c \
+                  ../../firmware/hfsplus/hfsplus_index_cache.c \
                   ../../firmware/hfsplus/hfsplus_mount.c \
                   ../../firmware/hfsplus/hfsplus_ro.c \
                   ../../firmware/hfsplus/hfsplus_partition.c
@@ -33,6 +34,7 @@ $(ADAPTER_HOST): $(ADAPTER_SOURCES) ../../firmware/export/hfsplus_rb.h \
                  ../../firmware/hfsplus/hfsplus_time.h \
                  ../../firmware/hfsplus/hfsplus_fat.h \
                  ../../firmware/hfsplus/hfsplus_namespace.h \
+                 ../../firmware/hfsplus/hfsplus_index_cache.h \
                  ../../firmware/hfsplus/hfsplus_overlay_load.h \
                  ../../firmware/hfsplus/hfsplus_overlay.h \
                  ../../firmware/hfsplus/hfsplus_ro.h \

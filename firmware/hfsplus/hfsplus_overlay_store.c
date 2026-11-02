@@ -236,6 +236,18 @@ int overlay_create_entry(struct hfs_state *s, uint32_t parent,
     int slot = overlay_find_free_slot(&s->overlay);
     if (slot < 0)
         return HFS_RO_BUFFER;
+    if (s->overlay.version == HFS_OVL_VERSION_3 &&
+        (uint32_t)slot >= s->overlay.entry_high_water) {
+        uint32_t old_high = s->overlay.entry_high_water;
+        s->overlay.entry_high_water = (uint32_t)slot + 1u;
+        /* The loader must see the new high-water bound before the entry it
+         * bounds becomes visible. */
+        int hrc = overlay_sync_header(s);
+        if (hrc) {
+            s->overlay.entry_high_water = old_high;
+            return hrc;
+        }
+    }
     struct hfs_overlay_entry *e = &s->overlay.entries[slot];
     memset(e, 0, sizeof(*e));
     int rc = overlay_new_id(s, &e->id);

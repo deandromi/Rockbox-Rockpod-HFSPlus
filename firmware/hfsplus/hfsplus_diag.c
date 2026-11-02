@@ -45,6 +45,26 @@ int hfsplus_last_stage_vol(int volume)
     return hfs_state_get(volume)->diag.last_stage;
 }
 
+int hfsplus_index_cache_used(int volume)
+{
+    return hfs_state_get(volume)->diag.index_cache;
+}
+
+unsigned int hfsplus_io_reads(int volume)
+{
+    return hfs_state_get(volume)->io.reads;
+}
+
+unsigned int hfsplus_io_writes(int volume)
+{
+    return hfs_state_get(volume)->io.writes;
+}
+
+unsigned int hfsplus_io_flushes(int volume)
+{
+    return hfs_state_get(volume)->diag.flush_ops;
+}
+
 int hfsplus_overlay_last_error_vol(int volume)
 {
     return hfs_state_get(volume)->diag.ovl_error;

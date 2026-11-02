@@ -315,6 +315,7 @@ hfsplus/hfsplus_overlay_validate.c
 hfsplus/hfsplus_overlay_load.c
 hfsplus/hfsplus_namespace.c
 hfsplus/hfsplus_fat.c
+hfsplus/hfsplus_index_cache.c
 hfsplus/hfsplus_mount.c
 #endif
 common/file.c

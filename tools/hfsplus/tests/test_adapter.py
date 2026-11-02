@@ -24,6 +24,8 @@ def overlay_layout(b, base):
         version = 2
     elif magic == b"RPOVL11\0":
         version = 1
+    elif magic == b"RPOVL13\0":
+        version = 3
     else:
         raise AssertionError(f"unknown overlay magic {magic!r}")
     block, count, total, bitmap_bytes, data_start = struct.unpack_from(
@@ -67,6 +69,57 @@ def container_fork_offset(b):
             if parent == 2 and name == ".rockpod-rw":
                 return start + off + key_size + 2 + 88
     raise AssertionError("container record not found")
+
+
+def overlay_checksum40(hdr):
+    value = 0
+    for byte in hdr[:40]:
+        value = ((value << 8) ^ (value + byte)) & 0xffffffff
+    return (~value) & 0xffffffff
+
+
+def overlay_checksum_v3(hdr):
+    value = 0
+    for i, byte in enumerate(hdr[:64]):
+        if 40 <= i < 44:
+            continue
+        value = ((value << 8) ^ (value + byte)) & 0xffffffff
+    return (~value) & 0xffffffff
+
+
+def make_v3_header(total_blocks, bitmap_bytes, state, high_water=0):
+    hdr = bytearray(4096)
+    hdr[:8] = b"RPOVL13\0"
+    bitmap_blocks = (bitmap_bytes + 4095) // 4096
+    entry_blocks = (2048 * 320 + 4095) // 4096
+    cache_start = 2 + bitmap_blocks + entry_blocks
+    cache_blocks = 64
+    data_start = cache_start + cache_blocks
+    struct.pack_into("<7I", hdr, 8, 3, 4096, 2048, total_blocks,
+                     bitmap_bytes, data_start, ID_BASE)
+    struct.pack_into("<I", hdr, 36, 0)
+    struct.pack_into("<4I", hdr, 44, high_water, cache_start,
+                     cache_blocks, state)
+    struct.pack_into("<I", hdr, 40, overlay_checksum_v3(hdr))
+    return hdr
+
+
+def v3_to_v2_header(b, base):
+    bitmap_bytes = struct.unpack_from("<I", b, base + 24)[0]
+    total_blocks = struct.unpack_from("<I", b, base + 20)[0]
+    next_id = struct.unpack_from("<I", b, base + 32)[0]
+    generation = struct.unpack_from("<I", b, base + 36)[0]
+    bitmap_blocks = (bitmap_bytes + 4095) // 4096
+    entry_blocks = (2048 * 320 + 4095) // 4096
+    data_start = 2 + bitmap_blocks + entry_blocks
+    hdr = bytearray(4096)
+    hdr[:8] = b"RPOVL12\0"
+    struct.pack_into("<7I", hdr, 8, 2, 4096, 2048, total_blocks,
+                     bitmap_bytes, data_start, next_id)
+    struct.pack_into("<I", hdr, 36, generation)
+    struct.pack_into("<I", hdr, 40, overlay_checksum40(hdr))
+    b[base:base + 4096] = hdr
+    b[base + 4096:base + 8192] = hdr
 
 
 class AdapterTests(unittest.TestCase):
@@ -227,6 +280,83 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(diag["stage"], "9")
         self.assertEqual(diag["slot"], "-1")
         self.assertEqual(diag["reason_name"], "none")
+
+    def test_partial_zero_container_never_initializes_fresh(self):
+        b, base, bitmap, entry_start, files = self.two_file_overlay()
+        victim = files[0]
+        raw = bytes(b[base + entry_start + victim["slot"] * 320:
+                      base + entry_start + (victim["slot"] + 1) * 320])
+        # Move one live entry beyond the first entry-table block, then make the
+        # header, backup, bitmap and first entry block look freshly zeroed.
+        slot = 100
+        off = base + entry_start + slot * 320
+        b[off:off + 320] = raw
+        start = base + entry_start + victim["slot"] * 320
+        b[start:start + 320] = b"\0" * 320
+        bitmap_bytes = struct.unpack_from("<I", b, base + 24)[0]
+        bitmap_blocks = (bitmap_bytes + fixtures.BLOCK - 1) // fixtures.BLOCK
+        b[base:base + 2 * fixtures.BLOCK] = b"\0" * (2 * fixtures.BLOCK)
+        b[base + bitmap:base + bitmap + bitmap_blocks * fixtures.BLOCK] = \
+            b"\0" * (bitmap_blocks * fixtures.BLOCK)
+        b[base + entry_start:base + entry_start + fixtures.BLOCK] = \
+            b"\0" * fixtures.BLOCK
+
+        diag = self.run_diag(bytes(b))
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "0")
+        self.assertEqual(diag["stage"], "3")
+        # The loader must not rewrite the non-zero later entry block.
+        out = self.path("diag-out.hfs").read_bytes()
+        self.assertEqual(out[off:off + 320], raw)
+
+    def test_flush_counters_are_live(self):
+        # The first mount of a zero container performs fresh initialization and
+        # header/bitmap commits, so the counters must be non-zero.
+        diag = self.run_diag(self.image)
+        self.assertGreater(int(diag["io_flushes"]), 0)
+        self.assertGreater(int(diag["io_reads"]), 0)
+        self.assertGreater(int(diag["io_writes"]), 0)
+
+    def test_v3_init_marker_resumes(self):
+        b = bytearray(self.image)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        total_blocks = 16 * 1024 * 1024 // fixtures.BLOCK
+        hdr = make_v3_header(total_blocks, 512, 1, 0)
+        b[base:base + 4096] = hdr
+        b[base + 4096:base + 8192] = hdr
+        diag = self.run_diag(bytes(b))
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "1")
+        self.assertEqual(diag["stage"], "9")
+
+    def test_v2_overlay_remains_readable(self):
+        b = bytearray(self.run_harness(self.image, "rw"))
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        v3_to_v2_header(b, base)
+        diag = self.run_diag(bytes(b))
+        self.assertEqual(diag["mount"], "0")
+        self.assertEqual(diag["ready"], "1")
+        self.assertEqual(diag["stage"], "9")
+        self.assertEqual(diag["index_cache"], "0")
+
+    def test_v3_index_cache_and_high_water(self):
+        out = self.run_harness(self.image, "rw")
+        b = bytearray(out)
+        base = fixtures.CONTAINER_START * fixtures.BLOCK
+        self.assertEqual(b[base:base + 8], b"RPOVL13\0")
+        high_water, cache_start, cache_blocks, state = struct.unpack_from(
+            "<4I", b, base + 44)
+        self.assertGreater(high_water, 0)
+        self.assertEqual(cache_blocks, 64)
+        self.assertEqual(state, 0)
+        self.assertNotEqual(cache_start, 0)
+        self.assertEqual(b[base + cache_start * fixtures.BLOCK:
+                           base + cache_start * fixtures.BLOCK + 6], b"RPIDX1")
+        # A second mount must accept the cache and remain healthy.
+        diag = self.run_diag(bytes(b))
+        self.assertEqual(diag["ready"], "1")
+        self.assertEqual(diag["stage"], "9")
+        self.assertEqual(diag["index_cache"], "1")
 
     def test_stage11_unallocated_range_reports_slot_and_reason(self):
         b, base, bitmap, _, files = self.two_file_overlay()

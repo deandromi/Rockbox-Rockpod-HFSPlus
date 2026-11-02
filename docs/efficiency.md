@@ -1,7 +1,7 @@
 # HFS+ adapter efficiency and power notes
 
-Status: post-decomposition review, 2026-11-02. Host/build verified only; no
-power measurement or hardware run has been recorded.
+Status: V3.0 Beta review, 2026-11-02. Host/build verified only; no power
+measurement or hardware run has been recorded.
 
 The dominant cost on an iPod is keeping the disk awake. CPU work matters at
 boot and during large directory scans, but every avoidable read, write or ATA
@@ -59,16 +59,29 @@ Safety argument:
 - all container writes still go to the extents captured at mount;
 - the existing corruption tests still fail closed at stage 2.
 
-This removes read amplification from the write path. It does not change the
-on-disk format or commit ordering.
+This removes read amplification from the write path. It does not change commit
+ordering.
+
+V3.0 also adds:
+
+- a persistent v3 directory/CNID index cache, so ordinary boots avoid the
+  full catalog scan;
+- a persisted entry high-water bound, so small overlays do not read all 2,048
+  entry slots;
+- removal of a redundant entry sync after realloc;
+- live ATA read/write/flush counters in Debug → Disk Info.
 
 ---
 
-## 2. Remaining hotspot: firmware mount builds the full catalog index
+## 2. V3.0 address: firmware mount's full catalog index
 
-`hfsplus_mount()` calls `hfs_ro_enable_fast_index()` in firmware builds.
-`build_dir_index()` walks the complete catalog leaf chain, reads every catalog
-node and parses every record to build:
+V3.0 stores the result of `build_dir_index()` in the overlay's reserved cache
+area when the container is v3. A validated generation match avoids the full
+catalog walk; a miss or stale cache rebuilds and rewrites it.
+
+The remaining v2 path still calls `hfs_ro_enable_fast_index()` and walks the
+complete catalog leaf chain. `build_dir_index()` reads every catalog node and
+parses every record to build:
 
 - the 16,384-parent directory index;
 - the 4,096-entry CNID index.
@@ -93,11 +106,10 @@ fall back to full catalog scans, which is worse for normal use.
 
 ---
 
-## 3. Remaining hotspot: overlay mount reads the whole 2048-entry table
+## 3. V3.0 address: overlay entry-table reads
 
-`overlay_load()` reads all 2,048 entries in 96-entry chunks: 640 KiB per mount,
-even when the overlay contains a handful of settings files. The chunking fixed
-the old 2,048-small-request behaviour, but the total bytes are unchanged.
+v3 stores `entry_high_water` and reads only that many slots. v1/v2 still read
+all 2,048 entries in 96-entry chunks (640 KiB per mount).
 
 A safe early-stop needs persistent knowledge of which slots can be used. Ideas:
 
@@ -116,7 +128,7 @@ a used slot above the number of allocated IDs.
 
 ---
 
-## 4. Remaining cost: ATA flushes are part of the durability contract
+## 4. Remaining cost: ATA flushes and commit groups
 
 `overlay_sync_entry()`, `overlay_sync_bitmap_range()` and
 `overlay_sync_header()` each end with `storage_flush()` when
@@ -136,11 +148,12 @@ points at unallocated blocks.
 
 Safe directions:
 
-- add a commit-group API that writes bitmap and entry, then flushes once, with a
+- a commit-group API that writes bitmap and entry, then flushes once, with a
   WAL/intent record that makes the order recoverable;
 - skip entry syncs when nothing changed (requires a dirty bit or cached encoded
-  entry; not yet implemented);
-- measure actual flush counts before changing anything.
+  entry);
+- measure actual flush counts with the new debug counters before changing
+  anything.
 
 Any change here requires the power-loss matrix in
 [`hardware-validation.md`](hardware-validation.md) before it can be trusted.

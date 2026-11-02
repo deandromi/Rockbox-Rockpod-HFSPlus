@@ -1,8 +1,8 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Release identity: **Rockpod HFS+ — Stable V2.1.1 // Version V12.3**.
-Internal version file: `docs/VERSION` = `1.0-v12.0`.
+Release identity: **Rockpod HFS+ — V3.0 Beta // Version V13.0**.
+Internal version file: `docs/VERSION` = `3.0.0-beta-v13.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
 Companion document: `agents.md` (architecture, invariants, code-quality review).
@@ -17,11 +17,11 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 | Check | Result |
 |---|---|
-| Host reader/partition tests | `make -C tools/hfsplus test` passed: API test, 19 reader tests, 3 of 4 partition tests (`test_native_adapter` skipped). |
+| Host reader/partition tests | `make -C tools/hfsplus test` passed: API test, 20 reader tests, 7 partition tests (`test_native_adapter` skipped) and 30 adapter tests. |
 | Reader under ASan/UBSan | Passed with `-no-pie` removed (the stock `sanitize` target is Linux-only). |
 | Real macOS HFS+ image | `hfsplus-inspect --scan` read a 64 MiB non-journaled image and a 64 MiB `HFS+J` image. |
 | Firmware build | `build-ipod6g/rockbox.ipod` 806,560 bytes; `rockbox.zip` 18–19 MiB. |
-| Bootloader build | `build-ipod6g-bootloader/bootloader-ipod6g.ipod` 98,920 bytes; `_moveend` within `MOVE_AREA`. |
+| Bootloader build | `build-ipod6g-bootloader/bootloader-ipod6g.ipod` 103,144 bytes; `_moveend` within `MOVE_AREA`. |
 | DFU installer build | `utils/mks5lboot/mks5lboot` 69,832 B Mach-O arm64; `--mkdfu-inst` accepted the bootloader and produced a 107,056-byte DFU image. |
 | Database tool build | `build-ipod6g-database/database.ipod6g` 184,464 B Mach-O arm64, built after restoring `uisimulator/common/filesystem-sim.{c,h}` from official Rockbox. |
 | Database tool smoke test | Ran on a temporary iPod root with `VOICE_PAUSE.wav`; exit 0, `database_idx.tcd` magic `0x54434810`, one track. |
@@ -58,7 +58,7 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 **Read-only device snapshot (2026-11-01):** native HFS+ passed `diskutil verifyVolume`; the overlay has 16 used entries, no root/`.rockbox`/`rockbox.ipod` tombstone, and all ranges are bitmap-owned. `.rockbox` exists natively but is hidden in the Rockbox file browser by the default `Show Files: Supported` dotfile filter. V2.1.1 boots with the overlay READY, settings persist after a clean reboot, and theme selection no longer panics. See `docs/ipod-device-investigation.md` and `docs/hardware-validation.md`.
 
-**Conclusion:** V2.1.1 addresses every remaining audit finding, fixes legacy overlay compatibility found on hardware, and passes the reader, partition, adapter and sanitizer checks. The test iPod reports overlay READY, persists settings/themes and plays normally. Six format/compatibility limits remain documented. See `docs/hfsplus-audit.md`, `docs/release-v2.1.1.md` and `docs/hardware-validation.md`.
+**Conclusion:** V2.1.1 is the hardware-validated baseline. V3.0 Beta adds the adapter decomposition, v3 overlay format, persistent index cache and the documented bug fixes; it is host/build verified and awaits device/power validation. Six format/compatibility limits remain documented. See `docs/hfsplus-audit.md`, `docs/release-v3.0-beta.md` and `docs/hardware-validation.md`.
 
 ---
 
@@ -84,10 +84,10 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 ### 1.3 Naming
 
-- Public name: **Stable V2.1.1 // Version V12.3**.
-- `docs/VERSION`: `1.0-v12.0`.
+- Public name: **V3.0 Beta // Version V13.0**.
+- `docs/VERSION`: `3.0.0-beta-v13.0`.
 - Built firmware version appends the UTC build date, e.g. `1.0-v12.0-261101`.
-- Internal overlay magic/version: `RPOVL11`, format version 1. This is **not** the public release number.
+- Internal overlay magic/version: `RPOVL11`/`RPOVL12`/`RPOVL13`, format versions 1/2/3. This is **not** the public release number. New containers initialize as v3.
 - The bootloader diagnostic text `HFS+ v8 ...` is an old label, not a release or bootloader version.
 
 ---
@@ -223,7 +223,7 @@ unzip -l rockbox.zip | grep '\.rockbox/rockbox\.ipod$'
 cat rockbox-info.txt | head -20
 ```
 
-`rockbox-info.txt` should report target `ipod6g`, ID 71, memory 64, and the expected version prefix. In the local build it reported `Version: 1.0-v12.0-261101` and `RAM usage: 5732648`.
+`rockbox-info.txt` should report target `ipod6g`, ID 71, memory 64, and the expected version prefix. In the local build it reported `Version: 3.0.0-beta-v13.0-261102` and `RAM usage: 5732648`.
 
 **Release hygiene:** the local `rockbox.zip` contained `.rockbox/.DS_Store` copied from the source tree. Before a release, remove `/.DS_Store`, `firmware/.DS_Store`, `tools/.DS_Store`, and any other macOS metadata, or add a packaging exclusion. Rebuild the zip and confirm the count is zero.
 
@@ -243,7 +243,7 @@ make -j"$(sysctl -n hw.ncpu)"
 Expected:
 
 - `build-ipod6g-bootloader/bootloader.elf` — ARM ELF.
-- `build-ipod6g-bootloader/bootloader-ipod6g.ipod` — scrambled image (~98,920 bytes in the local build).
+- `build-ipod6g-bootloader/bootloader-ipod6g.ipod` — scrambled image (103,144 bytes in the V3.0 Beta build).
 
 Checks:
 
@@ -901,7 +901,7 @@ Operational rules:
 
 | Gate | Method | Pass criteria | Evidence |
 |---|---|---|---|
-| Host reader tests | `make -C tools/hfsplus test` | API + 20 reader + 7 partition + 25 adapter tests pass; native adapter either passes or is explicitly skipped | Terminal log |
+| Host reader tests | `make -C tools/hfsplus test` | API + 20 reader + 7 partition + 30 adapter tests pass; native adapter either passes or is explicitly skipped | Terminal log |
 | Reader sanitizers | ASan/UBSan with platform-correct flags | No ASan/UBSan reports | Terminal log |
 | Real HFS+ image | `hfsplus-inspect --scan` on macOS-created HFS+ and HFS+J images | `info`, `ls`, `cat` work | Commands + output |
 | Firmware build | configure + make + zip | `rockbox.elf` ARM, `rockbox.ipod` present, zip valid | `rockbox-info.txt`, hashes |

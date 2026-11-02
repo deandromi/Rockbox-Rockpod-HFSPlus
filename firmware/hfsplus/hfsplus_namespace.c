@@ -439,7 +439,7 @@ int hfsplus_readdir(struct fat_filestr *stream, struct fat_dirscan_info *scan,
                     !!(s->volume.attributes & (1u << 12))))
                 continue;
             fat_empty_fat_direntry(entry);
-            strcpy((char *)entry->name, e.name);
+            strlcpy((char *)entry->name, e.name, sizeof(entry->name));
             entry->attr = e.kind == 1 ? ATTR_DIRECTORY : ATTR_ARCHIVE;
             entry->filesize = (uint32_t)e.data.size;
             entry->firstcluster = (int32_t)e.id;

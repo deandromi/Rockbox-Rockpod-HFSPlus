@@ -12,7 +12,7 @@ int overlay_free_run(struct hfs_state *s, struct hfs_overlay_entry *owner,
 int overlay_materialize_base(struct hfs_state *s, struct hfs_overlay_entry *e,
                              const struct hfs_ro_fork *fork);
 int overlay_ensure_capacity(struct hfs_state *s, struct hfs_overlay_entry *e,
-                            uint64_t bytes);
+                            uint64_t bytes, int *entry_synced);
 int overlay_shrink(struct hfs_state *s, struct hfs_overlay_entry *e,
                    uint64_t bytes);
 

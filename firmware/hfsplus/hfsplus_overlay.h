@@ -21,8 +21,10 @@
 #define HFS_OVL_NAME              ".rockpod-rw"
 #define HFS_OVL_MAGIC             "RPOVL12"
 #define HFS_OVL_MAGIC_V1          "RPOVL11"
+#define HFS_OVL_MAGIC_V3          "RPOVL13"
 #define HFS_OVL_VERSION           2u
 #define HFS_OVL_VERSION_V1        1u
+#define HFS_OVL_VERSION_3         3u
 #define HFS_OVL_BLOCK             4096u
 #define HFS_OVL_ENTRY_SIZE        320u
 #define HFS_OVL_MAX_ENTRIES       2048u
@@ -35,6 +37,10 @@
 #define HFS_OVL_PARENT_HASH_SIZE  2048u
 #define HFS_OVL_GROW_MIN_BLOCKS   8u   /* 32 KiB minimum allocation quantum */
 #define HFS_OVL_SHRINK_HYSTERESIS 64u  /* keep <=256 KiB slack to avoid churn */
+#define HFS_OVL_CACHE_BLOCKS      64u  /* v3 directory/CNID index cache */
+#define HFS_OVL_CACHE_BYTES       (HFS_OVL_CACHE_BLOCKS * HFS_OVL_BLOCK)
+#define HFS_OVL_STATE_READY       0u
+#define HFS_OVL_STATE_INIT        1u
 
 #define HFS_OVL_USED              0x00000001u
 #define HFS_OVL_DELETED           0x00000002u
@@ -69,6 +75,10 @@ struct hfs_overlay {
     uint32_t data_start;
     uint32_t free_blocks;
     uint32_t alloc_hint;
+    uint32_t entry_high_water;
+    uint32_t cache_start;
+    uint32_t cache_blocks;
+    uint32_t state;
     uint16_t free_slot_hint;
     struct hfs_ro_entry container;
     uint8_t bitmap[HFS_OVL_BITMAP_MAX];

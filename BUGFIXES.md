@@ -1,11 +1,14 @@
 # HFS+ / Rockpod bugfix list
 
-Status: **V2.0 release: all remaining findings addressed; six are documented format limits and are rejected safely.**
+Status: **V3.0 Beta: host/build verified; six documented format limits remain. Hardware validation for the v3 cache/format is pending.**
 Companion evidence log: `docs/hfsplus-audit.md` (HFS-001..HFS-133).
 Architecture/invariants: `agents.md`.
 Release/install gates: `shipping.md`.
 
-Snapshot 2026-11-01: **109 unique findings** (numbers have gaps): 6 S0, 24 S1, 51 S2, 28 S3; HFS-086 and HFS-119 remain hypotheses. V1.1 fixes the release-blocking subset listed in the V1.1 section below; the remaining OPEN items are still real and are not claimed fixed.
+Snapshot 2026-11-02: 109 unique findings (numbers have gaps). The code-fix
+tables below are kept as history; V3.0 Beta adds the adapter decomposition, v3
+overlay format, persistent index cache and the fixes recorded in the V3.0
+section. Do not use old status prose as a current release claim.
 
 This file is the actionable fix list. The audit log is the evidence; this list is the order of work, the intended fix and the required test for each finding.
 
@@ -31,9 +34,9 @@ The following findings were fixed in the V1.1 maintenance branch and are marked 
 
 Host/build verification for this release: `tools/hfsplus` reader tests (19 reader + 7 partition tests), firmware build, Thumb bootloader build, database host tool build, mks5lboot build, and the temporary adapter harness (overlay validation/commit, long-name rejection, directory-rename namespace, duplicate shadows, bitmap corruption fail-closed, ID collision, BASE close leak, EOF, and mounted fast-index unwind). The theme/settings fix (HFS-133) still requires the controlled clean-reboot test on the iPod; see `docs/ipod-device-investigation.md`.
 
-## Post-V2.1.1 (unreleased)
+## V3.0 Beta
 
-Stage 11 no longer reports only `-2`, slot `-1`; the adapter is also decomposed.
+V3.0 adds the v3 overlay format, persistent index cache and remaining fixes.
 
 - `overlay_validate()` now returns a `struct hfs_overlay_validation`
   (reason + failing slot) from `hfsplus_overlay_validate.c`; the loader applies
@@ -42,8 +45,9 @@ Stage 11 no longer reports only `-2`, slot `-1`; the adapter is also decomposed.
   diagnostics and time modules.
 - Debug → Disk Info shows `Overlay reason: <n> <name>` and the failing entry
   fields (id, parent, flags, kind/name length, data range).
-- The host adapter harness has a `diag` mode; 25 adapter tests now run,
-  including seven that assert stage-11 reason/slot pairs.
+- The host adapter harness has a `diag` mode; 30 adapter tests now run,
+  including v3 init/cache, v2 compatibility, timestamps and seven stage-11
+  reason/slot tests.
 - Overlay visibility reads now go through one `overlay_entry_visible()`
   predicate; the validator still computes the legacy shadow set.
 - `write_container_inline()` trusts the stage-2 container validation instead of
@@ -51,8 +55,15 @@ Stage 11 no longer reports only `-2`, slot `-1`; the adapter is also decomposed.
   read amplification from the write path; native in-place writes still validate.
 - No on-disk format change: v1 and v2 overlays remain readable, and no
   existing reason or field is renumbered.
-- Host verification: 20 reader + 7 partition + 25 adapter tests, including
-  ASan/UBSan on macOS. Firmware, Thumb bootloader and `rockbox.zip` build.
+- v3 overlay format: resumable `INIT` marker, high-water entry bound, 256 KiB
+  reserved directory/CNID index cache, checksummed extended header. v1/v2 remain
+  readable; existing v2 containers are not force-migrated.
+- Fresh initialization scans all metadata/cache blocks; overlay timestamps use
+  Unix seconds; duplicate-ID validation is independent of shadowing; v1 backup
+  probing works with a corrupt primary magic.
+- Host verification: 20 reader + 7 partition + 30 adapter tests, including
+  ASan/UBSan on macOS. Firmware, Thumb bootloader, `rockbox.zip`, DFU and
+  `mks5lboot` build.
 - Efficiency audit and remaining power work:
   [`docs/efficiency.md`](docs/efficiency.md).
 

@@ -54,6 +54,25 @@ int overlay_container_read(struct hfs_state *s, uint64_t off,
     return rc ? rc : (done == length ? HFS_RO_OK : HFS_RO_FORMAT);
 }
 
+/* 1 = all zero, 0 = a non-zero byte was found, negative = I/O error. */
+int overlay_container_all_zero(struct hfs_state *s, uint64_t off,
+                               uint64_t length)
+{
+    while (length) {
+        size_t chunk = length > sizeof(s->scratch) ?
+                       sizeof(s->scratch) : (size_t)length;
+        int rc = overlay_container_read(s, off, s->scratch, chunk);
+        if (rc)
+            return rc;
+        for (size_t i = 0; i < chunk; ++i)
+            if (s->scratch[i])
+                return 0;
+        off += chunk;
+        length -= chunk;
+    }
+    return 1;
+}
+
 int overlay_container_write(struct hfs_state *s, uint64_t off,
                             const void *buffer, size_t length)
 {
@@ -67,11 +86,14 @@ uint64_t overlay_entry_offset(const struct hfs_overlay *o,
            (uint64_t)index * HFS_OVL_ENTRY_SIZE;
 }
 
-static int overlay_flush(void)
+static int overlay_flush(struct hfs_state *s)
 {
 #ifdef HAVE_STORAGE_FLUSH
+    ++s->diag.flush_ops;
     if (storage_flush())
         return HFS_RO_IO;
+#else
+    (void)s;
 #endif
     return HFS_RO_OK;
 }
@@ -84,13 +106,28 @@ static uint32_t overlay_header_sum(const uint8_t *b)
     return ~sum;
 }
 
+static uint32_t overlay_header_sum_v3(const uint8_t *b)
+{
+    uint32_t sum = 0;
+    for (unsigned int i = 0; i < 64; ++i) {
+        if (i >= 40 && i < 44)
+            continue; /* checksum field */
+        sum = (sum << 8) ^ (sum + b[i]);
+    }
+    return ~sum;
+}
+
 int overlay_sync_header(struct hfs_state *s)
 {
     struct hfs_overlay *o = &s->overlay;
     uint8_t *b = s->scratch;
     memset(b, 0, HFS_OVL_BLOCK);
-    memcpy(b, o->version == HFS_OVL_VERSION_V1 ? HFS_OVL_MAGIC_V1 :
-              HFS_OVL_MAGIC, 7);
+    const char *magic = HFS_OVL_MAGIC;
+    if (o->version == HFS_OVL_VERSION_V1)
+        magic = HFS_OVL_MAGIC_V1;
+    else if (o->version == HFS_OVL_VERSION_3)
+        magic = HFS_OVL_MAGIC_V3;
+    memcpy(b, magic, 7);
     ovl_put32(b + 8, o->version);
     ovl_put32(b + 12, HFS_OVL_BLOCK);
     ovl_put32(b + 16, HFS_OVL_MAX_ENTRIES);
@@ -99,18 +136,27 @@ int overlay_sync_header(struct hfs_state *s)
     ovl_put32(b + 28, o->data_start);
     ovl_put32(b + 32, o->next_id);
     ovl_put32(b + 36, ++o->generation);
-    ovl_put32(b + 40, overlay_header_sum(b));
+    if (o->version == HFS_OVL_VERSION_3) {
+        ovl_put32(b + 44, o->entry_high_water);
+        ovl_put32(b + 48, o->cache_start);
+        ovl_put32(b + 52, o->cache_blocks);
+        ovl_put32(b + 56, o->state);
+        ovl_put32(b + 40, overlay_header_sum_v3(b));
+    } else {
+        ovl_put32(b + 40, overlay_header_sum(b));
+    }
     /* The v2 backup lives in block 1.  Legacy v1 keeps its bitmap in block 1,
      * so it stores a 64-byte backup at offset 2048 inside the header block.
      * Write the backup first so a torn primary can still be recovered. */
     int rc = HFS_RO_OK;
-    if (o->version == HFS_OVL_VERSION)
+    if (o->version == HFS_OVL_VERSION ||
+        o->version == HFS_OVL_VERSION_3)
         rc = overlay_container_write(s, HFS_OVL_BLOCK, b, HFS_OVL_BLOCK);
     else
         memcpy(b + 2048, b, 64); /* v1 backup inside the header block */
     if (!rc)
         rc = overlay_container_write(s, 0, b, HFS_OVL_BLOCK);
-    return rc ? rc : overlay_flush();
+    return rc ? rc : overlay_flush(s);
 }
 
 int overlay_sync_bitmap(struct hfs_state *s)
@@ -120,7 +166,7 @@ int overlay_sync_bitmap(struct hfs_state *s)
                                      HFS_OVL_BLOCK,
                                      s->overlay.bitmap,
                                      s->overlay.bitmap_bytes);
-    return rc ? rc : overlay_flush();
+    return rc ? rc : overlay_flush(s);
 }
 
 /* Persist only the device sectors of the bitmap touched by an allocation.
@@ -141,7 +187,7 @@ int overlay_sync_bitmap_range(struct hfs_state *s, uint32_t start,
     int rc = overlay_container_write(s,
                                      (uint64_t)o->bitmap_start * HFS_OVL_BLOCK +
                                      begin, o->bitmap + begin, end - begin);
-    return rc ? rc : overlay_flush();
+    return rc ? rc : overlay_flush(s);
 }
 
 static void overlay_encode_entry(const struct hfs_overlay_entry *e, uint8_t *b)
@@ -198,7 +244,7 @@ int overlay_sync_entry(struct hfs_state *s, unsigned int index)
     overlay_encode_entry(&s->overlay.entries[index], raw);
     int rc = overlay_container_write(s, overlay_entry_offset(&s->overlay, index),
                                      raw, sizeof(raw));
-    return rc ? rc : overlay_flush();
+    return rc ? rc : overlay_flush(s);
 }
 
 int overlay_data_read(struct hfs_state *s,
@@ -244,16 +290,37 @@ int overlay_parse_header(struct hfs_state *s, const uint8_t *b,
         version = HFS_OVL_VERSION;
     else if (!memcmp(b, HFS_OVL_MAGIC_V1, 7))
         version = HFS_OVL_VERSION_V1;
+    else if (!memcmp(b, HFS_OVL_MAGIC_V3, 7))
+        version = HFS_OVL_VERSION_3;
     else
         return HFS_RO_FORMAT;
     if (ovl_get32(b + 8) != version)
         return HFS_RO_FORMAT;
     uint32_t sum = ovl_get32(b + 40);
-    if ((version == HFS_OVL_VERSION && !sum) ||
-        (sum && sum != overlay_header_sum(b)))
+    if (version == HFS_OVL_VERSION_3) {
+        if (!sum || sum != overlay_header_sum_v3(b))
+            return HFS_RO_FORMAT;
+    } else if ((version == HFS_OVL_VERSION && !sum) ||
+               (sum && sum != overlay_header_sum(b))) {
         return HFS_RO_FORMAT;
+    }
     uint32_t bitmap_start = version == HFS_OVL_VERSION_V1 ? 1u : 2u;
-    uint32_t expected = bitmap_start + o->bitmap_blocks + o->entry_blocks;
+    uint32_t cache_start = 0, cache_blocks = 0;
+    uint32_t high_water = HFS_OVL_MAX_ENTRIES;
+    uint32_t state = HFS_OVL_STATE_READY;
+    if (version == HFS_OVL_VERSION_3) {
+        high_water = ovl_get32(b + 44);
+        cache_start = ovl_get32(b + 48);
+        cache_blocks = ovl_get32(b + 52);
+        state = ovl_get32(b + 56);
+        if (cache_blocks != HFS_OVL_CACHE_BLOCKS ||
+            high_water > HFS_OVL_MAX_ENTRIES ||
+            state > HFS_OVL_STATE_INIT ||
+            cache_start != bitmap_start + o->bitmap_blocks + o->entry_blocks)
+            return HFS_RO_FORMAT;
+    }
+    uint32_t expected = bitmap_start + o->bitmap_blocks + o->entry_blocks +
+                        cache_blocks;
     uint32_t total = ovl_get32(b + 20);
     uint32_t next = ovl_get32(b + 32);
     if (ovl_get32(b + 12) != HFS_OVL_BLOCK ||
@@ -267,6 +334,10 @@ int overlay_parse_header(struct hfs_state *s, const uint8_t *b,
     o->version = version;
     o->bitmap_start = bitmap_start;
     o->data_start = expected;
+    o->cache_start = cache_start;
+    o->cache_blocks = cache_blocks;
+    o->entry_high_water = high_water;
+    o->state = state;
     o->next_id = next;
     o->generation = ovl_get32(b + 36);
     o->header_recovered = backup;

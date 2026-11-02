@@ -10,6 +10,9 @@
 #define HFS_RO_ROOT_ID 2
 #define HFS_RO_DIR_INDEX_MAX 16384
 #define HFS_RO_CNID_INDEX_MAX 4096
+#define HFS_RO_INDEX_MAGIC "RPIDX1"
+#define HFS_RO_INDEX_VERSION 1u
+#define HFS_RO_INDEX_HEADER 64u
 
 enum hfs_ro_error {
     HFS_RO_OK = 0,
@@ -74,6 +77,8 @@ struct hfs_ro_volume {
     uint32_t blocks;
     uint32_t free_blocks;
     uint32_t attributes;
+    uint32_t write_count;
+    uint32_t modify_date;
     struct hfs_ro_fork alloc;
     struct hfs_ro_fork extents;
     struct hfs_ro_fork attrs;
@@ -121,6 +126,11 @@ int hfs_ro_mount(struct hfs_ro_volume *volume, hfs_ro_read_fn read,
                  void *scratch, size_t scratch_size);
 void hfs_ro_unmount(struct hfs_ro_volume *volume);
 int hfs_ro_enable_fast_index(struct hfs_ro_volume *volume, void *cache, size_t cache_size);
+uint64_t hfs_ro_fast_index_generation(const struct hfs_ro_volume *volume);
+int hfs_ro_fast_index_export(const struct hfs_ro_volume *volume, void *data,
+                             size_t size, size_t *used);
+int hfs_ro_fast_index_import(struct hfs_ro_volume *volume, void *cache,
+                             size_t cache_size, const void *data, size_t size);
 /* True when every block in fork is allocated and outside HFS+ metadata. */
 int hfs_ro_fork_writable(const struct hfs_ro_volume *volume,
                          const struct hfs_ro_fork *fork);

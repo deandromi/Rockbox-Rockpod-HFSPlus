@@ -21,6 +21,10 @@ struct hfs_io {
     int drive;
     uint32_t sector_size;
     uint64_t size;
+    uint32_t reads;
+    uint32_t writes;
+    uint64_t read_bytes;
+    uint64_t write_bytes;
     /* Large aligned bounce buffer lets the 512-byte iFlash ATA layer service
      * sequential HFS+ reads/writes in batches instead of one sector/call. */
     uint8_t buffer[HFS_IO_BOUNCE_SIZE] __attribute__((aligned(32)));
@@ -28,6 +32,8 @@ struct hfs_io {
 
 struct hfs_diag {
     int last_error;
+    int index_cache;
+    uint32_t flush_ops;
     int last_stage;
     int ovl_error;
     int ovl_stage;
@@ -54,6 +60,7 @@ struct hfs_state {
     struct hfs_diag diag;
     uint8_t scratch[HFS_RO_MAX_NODE_SIZE];
     uint8_t catalog_cache[HFS_RO_MAX_NODE_SIZE] __attribute__((aligned(32)));
+    uint8_t index_cache[HFS_OVL_CACHE_BYTES];
 };
 
 extern struct hfs_state hfs_states[HFS_NUM_VOLUMES];

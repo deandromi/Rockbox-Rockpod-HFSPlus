@@ -34,12 +34,48 @@ int overlay_validate(struct hfs_overlay *o,
     result->reason = HFS_OVL_REASON_NONE;
     memset(o->shadowed, 0, sizeof(o->shadowed));
 
+    /* ID uniqueness is independent of legacy name/BASE shadowing.  Use the
+     * runtime ID hash as scratch; it is rebuilt from the persistent entries
+     * after validation succeeds. */
+    memset(o->id_hash, 0xff, sizeof(o->id_hash));
+    for (unsigned int i = 0; i < HFS_OVL_MAX_ENTRIES; ++i) {
+        const struct hfs_overlay_entry *e = &o->entries[i];
+        if (!(e->flags & HFS_OVL_USED))
+            continue;
+        if (e->id < HFS_OVL_ID_BASE || e->id > 0x7fffffffu)
+            return overlay_validate_fail(result, (int)i,
+                                         HFS_OVL_REASON_ENTRY_ID);
+        unsigned int b = (e->id * 2654435761u) & (HFS_OVL_ID_HASH_SIZE - 1u);
+        unsigned int n;
+        for (n = 0; n < HFS_OVL_ID_HASH_SIZE; ++n) {
+            uint16_t v = o->id_hash[b];
+            if (v == HFS_OVL_NONE) {
+                o->id_hash[b] = (uint16_t)i;
+                break;
+            }
+            if (o->entries[v].id == e->id)
+                return overlay_validate_fail(result, (int)i,
+                                             HFS_OVL_REASON_DUPLICATE_ID);
+            b = (b + 1u) & (HFS_OVL_ID_HASH_SIZE - 1u);
+        }
+        if (n == HFS_OVL_ID_HASH_SIZE)
+            return overlay_validate_fail(result, (int)i,
+                                         HFS_OVL_REASON_DUPLICATE_ID);
+    }
+
     if (!o->total_blocks || !o->bitmap_bytes ||
         (o->version != HFS_OVL_VERSION_V1 &&
-         o->version != HFS_OVL_VERSION) ||
+         o->version != HFS_OVL_VERSION &&
+         o->version != HFS_OVL_VERSION_3) ||
+        (o->version == HFS_OVL_VERSION_3 &&
+         (o->cache_blocks != HFS_OVL_CACHE_BLOCKS ||
+          o->cache_start != o->bitmap_start + o->bitmap_blocks +
+                            o->entry_blocks ||
+          o->entry_high_water > HFS_OVL_MAX_ENTRIES ||
+          o->state > HFS_OVL_STATE_INIT)) ||
         o->bitmap_start != (o->version == HFS_OVL_VERSION_V1 ? 1u : 2u) ||
         o->data_start != o->bitmap_start + o->bitmap_blocks +
-                          o->entry_blocks ||
+                          o->entry_blocks + o->cache_blocks ||
         o->data_start >= o->total_blocks ||
         o->bitmap_blocks > o->total_blocks ||
         o->entry_blocks > o->total_blocks)
@@ -49,9 +85,6 @@ int overlay_validate(struct hfs_overlay *o,
         const struct hfs_overlay_entry *e = &o->entries[i];
         if (!(e->flags & HFS_OVL_USED))
             continue;
-        if (e->id < HFS_OVL_ID_BASE || e->id > 0x7fffffffu)
-            return overlay_validate_fail(result, (int)i,
-                                         HFS_OVL_REASON_ENTRY_ID);
         if (e->parent < HFS_RO_ROOT_ID || e->parent == e->id)
             return overlay_validate_fail(result, (int)i,
                                          HFS_OVL_REASON_PARENT);
@@ -73,9 +106,6 @@ int overlay_validate(struct hfs_overlay *o,
                 const struct hfs_overlay_entry *p = &o->entries[j];
                 if (!(p->flags & HFS_OVL_USED) || !overlay_entry_visible(o, j))
                     continue;
-                if (p->id == e->id)
-                    return overlay_validate_fail(result, (int)i,
-                                                 HFS_OVL_REASON_DUPLICATE_ID);
                 /* Old firmware allowed duplicate live names and duplicate
                  * BASE shadows.  Keep the newest ID and hide the older one in
                  * RAM; never reject an otherwise readable legacy overlay. */

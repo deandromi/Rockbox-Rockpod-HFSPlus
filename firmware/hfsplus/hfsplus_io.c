@@ -100,6 +100,8 @@ int setup_io(struct hfs_io *io, int drive)
     io->drive = drive;
     io->sector_size = info.sector_size;
     io->size = (uint64_t)info.num_sectors * info.sector_size;
+    io->reads = io->writes = 0;
+    io->read_bytes = io->write_bytes = 0;
     return 0;
 }
 
@@ -119,6 +121,8 @@ int device_read(void *ctx, uint64_t offset, void *buffer, size_t length)
     uint8_t *out = buffer;
     if (offset > io->size || length > io->size - offset)
         return -1;
+    ++io->reads;
+    io->read_bytes += length;
 
     /* Unaligned prefix. */
     if (length && offset % io->sector_size) {
@@ -168,6 +172,8 @@ int device_write(void *ctx, uint64_t offset, const void *buffer,
     const uint8_t *in = buffer;
     if (offset > io->size || length > io->size - offset)
         return -1;
+    ++io->writes;
+    io->write_bytes += length;
 
     if (length && offset % io->sector_size) {
         uint32_t within = offset % io->sector_size;

@@ -170,8 +170,10 @@ static int overlay_try_extend(struct hfs_state *s, struct hfs_overlay_entry *e,
 }
 
 static int overlay_realloc(struct hfs_state *s, struct hfs_overlay_entry *e,
-                           uint32_t needed)
+                           uint32_t needed, int *entry_synced)
 {
+    if (entry_synced)
+        *entry_synced = 0;
     if (needed <= e->data_blocks)
         return HFS_RO_OK;
     if (e->data_blocks) {
@@ -214,6 +216,8 @@ static int overlay_realloc(struct hfs_state *s, struct hfs_overlay_entry *e,
     e->data_start = newstart;
     e->data_blocks = needed;
     rc = overlay_sync_entry(s, (unsigned int)(e - s->overlay.entries));
+    if (!rc && entry_synced)
+        *entry_synced = 1;
     if (rc) {
         e->data_start = oldstart;
         e->data_blocks = oldblocks;
@@ -308,7 +312,7 @@ int overlay_materialize_base(struct hfs_state *s,
 
 int overlay_ensure_capacity(struct hfs_state *s,
                             struct hfs_overlay_entry *e,
-                            uint64_t bytes)
+                            uint64_t bytes, int *entry_synced)
 {
     if (bytes > (uint64_t)(s->overlay.total_blocks - s->overlay.data_start) *
                 HFS_OVL_BLOCK)
@@ -317,9 +321,9 @@ int overlay_ensure_capacity(struct hfs_state *s,
     if (!needed || needed <= e->data_blocks)
         return HFS_RO_OK;
     uint32_t target = overlay_growth_target(&s->overlay, e->data_blocks, needed);
-    int rc = overlay_realloc(s, e, target);
+    int rc = overlay_realloc(s, e, target, entry_synced);
     if (rc == HFS_RO_BUFFER && target != needed)
-        rc = overlay_realloc(s, e, needed);
+        rc = overlay_realloc(s, e, needed, entry_synced);
     return rc;
 }
 

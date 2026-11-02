@@ -76,7 +76,7 @@ int hfsplus_closewrite(struct fat_filestr *filestr, uint32_t size,
                 goto out;
         }
         if (!(e->flags & HFS_OVL_BASE)) {
-            rc = overlay_ensure_capacity(s, e, size);
+            rc = overlay_ensure_capacity(s, e, size, NULL);
             if (rc)
                 goto out;
             rc = overlay_shrink(s, e, size);
@@ -258,10 +258,12 @@ long hfsplus_readwrite(struct fat_filestr *stream, unsigned long sectors,
                 goto out;
             }
             uint32_t old_start = oe->data_start, old_blocks = oe->data_blocks;
-            rc = overlay_ensure_capacity(s, oe, end);
+            int entry_synced = 0;
+            rc = overlay_ensure_capacity(s, oe, end, &entry_synced);
             if (rc)
                 goto out;
-            if (old_start != oe->data_start || old_blocks != oe->data_blocks) {
+            if (!entry_synced &&
+                (old_start != oe->data_start || old_blocks != oe->data_blocks)) {
                 rc = overlay_sync_entry(s, file->hfs_overlay_index);
                 if (rc)
                     goto out;

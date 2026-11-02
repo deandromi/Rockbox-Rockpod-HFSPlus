@@ -339,3 +339,7 @@ __pycache__
 
 # Machine-local MCP wiring (absolute paths)
 opencode.json
+
+# HFS+ host harness build outputs
+/tools/hfsplus/api-test
+/tools/hfsplus/hfsplus-inspect

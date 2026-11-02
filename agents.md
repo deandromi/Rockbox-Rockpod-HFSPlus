@@ -1,8 +1,8 @@
 # agents.md — working contract for Rockbox-Rockpod-HFSPlus
 
-Status: reviewed 2026-11-01 for V2.1.1.
+Status: reviewed 2026-11-02 for V3.0 Beta.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
-Public release identity: **Stable V2.1.1 // Version V12.3** (`docs/VERSION` is `2.1.1-v12.3`).
+Public release identity: **V3.0 Beta // Version V13.0** (`docs/VERSION` is `3.0.0-beta-v13.0`).
 
 This checkout may be a source snapshot. Use a real git clone for history, branches and diffs.
 
@@ -88,6 +88,8 @@ Important:
 - Directory index: 16,384 parent IDs.
 - CNID hash index: 4,096 entries; overflow falls back to a validated full catalog scan.
 - Catalog node cache: one 32 KiB node per volume.
+- v3 overlays may persist both indexes in a 256 KiB reserved cache, keyed by
+  native volume write count/modify date and catalog shape.
 - Node offset tables are validated once per node read, not per record.
 
 ### 2.3 Reader invariants
@@ -116,18 +118,19 @@ Important:
 
 ### 3.2 Persistent formats
 
-Two layouts are readable:
+Three layouts are readable:
 
-| | v1 `RPOVL11` | v2 `RPOVL12` |
-|---|---|---|
-| Header | block 0 | block 0 |
-| Header checksum | offset 40 when synced | offset 40, required |
-| Backup | 64 bytes at offset 2048 when synced | full block 1 |
-| Bitmap start | block 1 | block 2 |
-| Entry table | `(1 + bitmap_blocks) * 4096` | `(2 + bitmap_blocks) * 4096` |
-| `data_start` | `1 + bitmap_blocks + entry_blocks` | `2 + bitmap_blocks + entry_blocks` |
+| | v1 `RPOVL11` | v2 `RPOVL12` | v3 `RPOVL13` |
+|---|---|---|---|
+| Header | block 0 | block 0 | block 0 |
+| Header checksum | offset 40 when synced | offset 40, required | offset 40 over 0..63 except the checksum |
+| Backup | 64 bytes at offset 2048 | full block 1 | full block 1 |
+| Bitmap start | block 1 | block 2 | block 2 |
+| Entry table | `(1 + bitmap_blocks) * 4096` | `(2 + bitmap_blocks) * 4096` | `(2 + bitmap_blocks) * 4096` |
+| Index cache | none | none | 64 blocks after the entry table |
+| `data_start` | `1 + bitmap_blocks + entry_blocks` | `2 + bitmap_blocks + entry_blocks` | `2 + bitmap_blocks + entry_blocks + 64` |
 
-Header fields (little-endian): magic, version at 8, block size 12, max entries 16, total blocks 20, bitmap bytes 24, data start 28, next ID 32, generation 36, checksum 40.
+Header fields (little-endian): magic, version at 8, block size 12, max entries 16, total blocks 20, bitmap bytes 24, data start 28, next ID 32, generation 36, checksum 40. v3 adds: entry high-water 44, cache start 48, cache blocks 52, state 56 (`READY=0`, `INIT=1`).
 
 Entry size is 320 bytes:
 
@@ -139,9 +142,12 @@ Entry size is 320 bytes:
 
 Flags: `USED=1`, `DELETED=2`, `BASE=4`, `TOMBSTONE=8`.
 
-- v2 writes the backup before the primary.
+- v2/v3 write the backup before the primary.
 - v1 gets a checksum and an in-block backup when its header is next synced.
-- Fresh initialization requires the header, backup, bitmap and entry-table blocks to be zero. A non-zero invalid header fails closed.
+- Fresh initialization is v3 only. It writes the `INIT` header first, then the
+  bitmap/entry table/cache, then publishes `READY`; a power loss is resumable.
+- Fresh initialization requires every header, bitmap, entry-table and cache
+  block to be zero. Non-zero metadata anywhere fails closed.
 
 ### 3.3 Validation stages
 
@@ -156,7 +162,7 @@ Flags: `USED=1`, `DELETED=2`, `BASE=4`, `TOMBSTONE=8`.
 | 7 | Read entry chunk |
 | 8 | Decode entry |
 | 9 | Ready |
-| 10 | Fresh initialization |
+| 10 | Fresh v3 initialization / resume |
 | 11 | Whole-overlay validation |
 
 ### 3.4 Legacy compatibility
@@ -165,7 +171,7 @@ Flags: `USED=1`, `DELETED=2`, `BASE=4`, `TOMBSTONE=8`.
 - Duplicate BASE/tombstone entries are resolved the same way.
 - A non-`BASE` entry may carry a native `base_id` below `0x40000000`. This is a legacy namespace hint, not an unmaterialized BASE shadow.
 - A `base_id` in the overlay ID range is rejected.
-- Stage 11 must expose a failing slot/reason in future work; today it reports `-2` with slot `-1`.
+- Stage 11 reports a reason code and failing slot; the debug screen shows both.
 
 ### 3.5 Allocation and commit
 
@@ -215,14 +221,14 @@ Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware
 | Filesystem | HFS+ v4; no APFS/HFSX |
 | Journal | clean only; no replay |
 | Extents | eight inline; no extents-overflow tree |
-| Overlay | 16 MiB minimum, 2 GiB maximum, fixed size |
+| Overlay | 16 MiB minimum, 2 GiB maximum, fixed size; v3 reserves 256 KiB for the index cache |
 | Entries | 2,048 |
 | Names | exact bytes; no Unicode normalization/case folding |
 | Native names | >255 bytes skipped |
 | Directory index | 16,384 parents; fallback scan |
 | CNID index | 4,096 entries; fallback scan |
 | Database workflow | Mac host build; on-device rebuild unsupported |
-| Hardware | V2.1.1 confirmed on one Classic 6G; other revisions/adapters unverified |
+| Hardware | V2.1.1 confirmed on one Classic 6G; V3.0/v3 cache and iFlash validation pending |
 
 ---
 
@@ -240,12 +246,13 @@ Current expected result:
 
 - 20 reader tests.
 - 7 partition tests.
-- 25 adapter tests (including fault injection, legacy overlay shapes and stage-11 reason/slot diagnostics).
+- 30 adapter tests (including fault injection, legacy v1/v2 shapes, v3 init
+  resume/cache, timestamps and stage-11 reason/slot diagnostics).
 - ASan/UBSan passes on macOS.
 - macOS host integration mode passes.
 - Firmware, Thumb bootloader, database host tool, `mks5lboot`, DFU and `rockbox.zip` build.
 
-Release hashes are in `docs/release-v2.1.1.md`. Do not reuse historical hashes from this file.
+Release hashes are in `docs/release-v3.0-beta.md`. Do not reuse historical hashes from this file.
 
 Build commands:
 
@@ -270,6 +277,7 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
 ## 7. Diagnostics
 
 - Healthy overlay: `READY`, stage 9, error 0, slot -1, reason 0 (`none`).
+- Debug also reports index-cache HIT/MISS and ATA read/write/flush counters.
 - Stage 2: container/extent/allocation validation.
 - Stages 3–6: header/bitmap.
 - Stages 7–8: entry table/decode; slot identifies the record.
@@ -292,7 +300,7 @@ retained so the review history is not lost.
 
 Prioritized structural findings. These are maintainability blockers, not cosmetic nits.
 
-1. **Monolith removed (resolved post-V2.1.1).** `hfsplus_rb.c` no longer exists. The adapter is split into `hfsplus_io.c`, `hfsplus_overlay_format.c`, `hfsplus_overlay_alloc.c`, `hfsplus_overlay_store.c`, `hfsplus_overlay_validate.c`, `hfsplus_overlay_load.c`, `hfsplus_namespace.c`, `hfsplus_fat.c`, `hfsplus_mount.c`, `hfsplus_state.c`, `hfsplus_diag.c` and `hfsplus_time.c`. Keep new behavior in the owning module.
+1. **Monolith removed (resolved post-V2.1.1).** `hfsplus_rb.c` no longer exists. The adapter is split into `hfsplus_io.c`, `hfsplus_overlay_format.c`, `hfsplus_overlay_alloc.c`, `hfsplus_overlay_store.c`, `hfsplus_overlay_validate.c`, `hfsplus_overlay_load.c`, `hfsplus_namespace.c`, `hfsplus_fat.c`, `hfsplus_index_cache.c`, `hfsplus_mount.c`, `hfsplus_state.c`, `hfsplus_diag.c` and `hfsplus_time.c`. Keep new behavior in the owning module.
 2. **`shadowed[]` is still a second source of truth, but reads are centralized.** Every visibility read now goes through `overlay_entry_visible()`; the validator still computes the shadow set. A resolved-entry table (or an explicit entry mode) would remove the remaining write-side coupling.
 3. **Legacy compatibility is ad-hoc.** Duplicate names, duplicate BASE/tombstone, and `base_id` without `BASE` are handled by separate conditionals in validation. Introduce an explicit entry mode (`FILE`, `BASE`, `TOMBSTONE`, `LEGACY_BASE`) resolved once at load. This deletes condition chains rather than centralizing them.
 4. **Stage 11 diagnostics were opaque (resolved after V2.1.1).** The overlay used to be rejected with `-2`, slot `-1`, so the actual cause required reverse-engineering with Python. `overlay_validate()` now returns a `struct hfs_overlay_validation` with a reason and failing slot; `overlay_load()` applies it to diagnostics, and the debug screen shows both plus the failing entry fields. Extend the enum and the host reason/slot tests together; do not renumber existing values.
@@ -403,6 +411,7 @@ Hard stops:
 | `firmware/hfsplus/hfsplus_overlay_store.c` | Entry lifecycle, IDs and hash indexes |
 | `firmware/hfsplus/hfsplus_namespace.c` | Native+overlay namespace merge |
 | `firmware/hfsplus/hfsplus_fat.c` | FAT/VFS adapter boundary |
+| `firmware/hfsplus/hfsplus_index_cache.c` | v3 persisted directory/CNID index cache |
 | `firmware/hfsplus/hfsplus_mount.c` | Partition scan and mount lifecycle |
 | `firmware/hfsplus/hfsplus_io.c` | Sector I/O and inline writes |
 | `firmware/hfsplus/hfsplus_state.{c,h}` | Per-volume adapter state |
@@ -428,6 +437,7 @@ Hard stops:
 | `shipping.md` | Build/release/install runbook |
 | `docs/hardware-validation.md` | Hardware test roadmap |
 | `docs/efficiency.md` | Disk/CPU power audit and measurement checklist |
+| `docs/release-v3.0-beta.md` | V3.0 Beta release notes and hashes |
 | `docs/next-steps.md` | Deferred hardware work, thermo-nuclear review and XERJ licensing note |
 
 ### 11.1 Optional semantic index

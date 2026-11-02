@@ -14,6 +14,67 @@
 
 #ifndef BOOTLOADER
 
+static int overlay_init_fresh(struct hfs_state *s, struct hfs_overlay *o,
+                              struct hfs_overlay_validation *vr)
+{
+    s->diag.ovl_stage = 10;
+    o->version = HFS_OVL_VERSION_3;
+    o->bitmap_start = 2u;
+    o->cache_blocks = HFS_OVL_CACHE_BLOCKS;
+    o->cache_start = o->bitmap_start + o->bitmap_blocks + o->entry_blocks;
+    o->data_start = o->cache_start + o->cache_blocks;
+    o->entry_high_water = 0;
+    o->state = HFS_OVL_STATE_INIT;
+    o->next_id = HFS_OVL_ID_BASE;
+    o->generation = 0;
+    o->header_recovered = 0;
+    o->ready = 0;
+    if (o->data_start + 16u >= o->total_blocks)
+        return overlay_diag_fail(s, 2, HFS_RO_BUFFER, -1);
+
+    /* Persist the init marker before touching the table.  A power loss after
+     * this point is recoverable by rerunning the same idempotent sequence. */
+    int rc = overlay_sync_header(s);
+    if (rc)
+        return overlay_diag_fail(s, 10, rc, -1);
+
+    memset(o->bitmap, 0, sizeof(o->bitmap));
+    memset(o->entries, 0, sizeof(o->entries));
+    for (uint32_t b = 0; b < o->data_start; ++b)
+        overlay_set_bit(o, b, 1);
+
+    memset(s->scratch, 0, sizeof(s->scratch));
+    uint64_t left = (uint64_t)(o->entry_blocks + o->cache_blocks) *
+                    HFS_OVL_BLOCK;
+    uint64_t off = (uint64_t)(o->bitmap_start + o->bitmap_blocks) *
+                   HFS_OVL_BLOCK;
+    while (left) {
+        size_t chunk = left > sizeof(s->scratch) ?
+                       sizeof(s->scratch) : (size_t)left;
+        rc = overlay_container_write(s, off, s->scratch, chunk);
+        if (rc)
+            return overlay_diag_fail(s, 10, rc, -1);
+        off += chunk;
+        left -= chunk;
+    }
+    rc = overlay_sync_bitmap(s);
+    if (rc)
+        return overlay_diag_fail(s, 10, rc, -1);
+    rc = overlay_validate(o, vr);
+    if (rc)
+        return overlay_diag_validation(s, vr);
+    overlay_rebuild_indexes(o);
+    o->state = HFS_OVL_STATE_READY;
+    o->ready = 1;
+    rc = overlay_sync_header(s);
+    if (rc) {
+        o->ready = 0;
+        return overlay_diag_fail(s, 10, rc, -1);
+    }
+    s->diag.ovl_stage = 9;
+    return HFS_RO_OK;
+}
+
 int overlay_load(struct hfs_state *s)
 {
     struct hfs_overlay *o = &s->overlay;
@@ -47,9 +108,13 @@ int overlay_load(struct hfs_state *s)
     o->bitmap_blocks = (o->bitmap_bytes + HFS_OVL_BLOCK - 1) / HFS_OVL_BLOCK;
     o->entry_blocks = (HFS_OVL_MAX_ENTRIES * HFS_OVL_ENTRY_SIZE +
                        HFS_OVL_BLOCK - 1) / HFS_OVL_BLOCK;
-    o->version = HFS_OVL_VERSION;
+    o->version = HFS_OVL_VERSION_3;
     o->bitmap_start = 2u;
-    o->data_start = o->bitmap_start + o->bitmap_blocks + o->entry_blocks;
+    o->cache_blocks = HFS_OVL_CACHE_BLOCKS;
+    o->cache_start = o->bitmap_start + o->bitmap_blocks + o->entry_blocks;
+    o->data_start = o->cache_start + o->cache_blocks;
+    o->entry_high_water = HFS_OVL_MAX_ENTRIES;
+    o->state = HFS_OVL_STATE_READY;
     if (o->data_start + 16u >= o->total_blocks)
         return overlay_diag_fail(s, 2, HFS_RO_BUFFER, -1);
 
@@ -59,87 +124,60 @@ int overlay_load(struct hfs_state *s)
         return overlay_diag_fail(s, 3, rc, -1);
     int hrc = overlay_parse_header(s, s->scratch, 0);
     if (hrc) {
-        /* v2 keeps a second header copy in block 1.  A zeroed container is
-         * still the only case that may be initialised fresh; anything else
-         * fails closed and stays available read-only for recovery. */
         uint8_t *backup = s->scratch + HFS_OVL_BLOCK;
         bool primary_v1 = !memcmp(s->scratch, HFS_OVL_MAGIC_V1, 7);
-        uint64_t backup_off = primary_v1 ? 2048u : HFS_OVL_BLOCK;
-        size_t backup_len = primary_v1 ? 64u : HFS_OVL_BLOCK;
-        rc = overlay_container_read(s, backup_off, backup, backup_len);
-        if (rc)
-            return overlay_diag_fail(s, 3, rc, -1);
-        hrc = overlay_parse_header(s, backup, 1);
+        /* Probe both backup layouts: v2's full block 1 and v1's 64-byte copy
+         * at offset 2048.  A corrupt primary magic must not stop us trying the
+         * legacy copy. */
+        uint64_t backup_off[2] = { HFS_OVL_BLOCK, 2048u };
+        size_t backup_len[2] = { HFS_OVL_BLOCK, 64u };
+        if (primary_v1) {
+            backup_off[0] = 2048u;
+            backup_len[0] = 64u;
+            backup_off[1] = HFS_OVL_BLOCK;
+            backup_len[1] = HFS_OVL_BLOCK;
+        }
+        for (unsigned int n = 0; n < 2 && hrc; ++n) {
+            rc = overlay_container_read(s, backup_off[n], backup,
+                                        backup_len[n]);
+            if (rc)
+                return overlay_diag_fail(s, 3, rc, -1);
+            hrc = overlay_parse_header(s, backup, 1);
+        }
         if (!hrc) {
             memcpy(s->scratch, backup, 64);
+            if (o->version == HFS_OVL_VERSION_3 &&
+                o->state == HFS_OVL_STATE_INIT)
+                return overlay_init_fresh(s, o, &vr);
         } else {
-            bool zero = true;
-            for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i)
-                if (s->scratch[i] || backup[i]) {
-                    zero = false;
-                    break;
-                }
-            if (!zero)
+            int zrc = overlay_container_all_zero(s, 0,
+                                                 2u * HFS_OVL_BLOCK);
+            if (zrc < 0)
+                return overlay_diag_fail(s, 3, zrc, -1);
+            if (!zrc)
                 return overlay_diag_fail(s, 3, HFS_RO_FORMAT, -1);
-            rc = overlay_container_read(s, 2u * HFS_OVL_BLOCK, backup,
-                                        HFS_OVL_BLOCK);
-            if (rc)
-                return overlay_diag_fail(s, 3, rc, -1);
-            for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i)
-                if (backup[i]) {
-                    zero = false;
-                    break;
-                }
-            rc = overlay_container_read(s,
-                    (uint64_t)(2u + o->bitmap_blocks) * HFS_OVL_BLOCK,
-                    backup, HFS_OVL_BLOCK);
-            if (rc)
-                return overlay_diag_fail(s, 3, rc, -1);
-            for (unsigned int i = 0; i < HFS_OVL_BLOCK; ++i)
-                if (backup[i]) {
-                    zero = false;
-                    break;
-                }
-            if (!zero)
+            zrc = overlay_container_all_zero(s,
+                        (uint64_t)2u * HFS_OVL_BLOCK,
+                        (uint64_t)o->bitmap_blocks * HFS_OVL_BLOCK);
+            if (zrc < 0)
+                return overlay_diag_fail(s, 3, zrc, -1);
+            if (!zrc)
                 return overlay_diag_fail(s, 3, HFS_RO_FORMAT, -1);
-            s->diag.ovl_stage = 10; /* initialise fresh v2 overlay */
-            memset(o->bitmap, 0, sizeof(o->bitmap));
-            memset(o->entries, 0, sizeof(o->entries));
-            for (uint32_t b = 0; b < o->data_start; ++b)
-                overlay_set_bit(o, b, 1);
-            memset(s->scratch, 0, sizeof(s->scratch));
-            uint64_t left = (uint64_t)o->entry_blocks * HFS_OVL_BLOCK;
-            uint64_t off = (uint64_t)(o->bitmap_start + o->bitmap_blocks) *
-                           HFS_OVL_BLOCK;
-            while (left) {
-                size_t chunk = left > sizeof(s->scratch) ?
-                               sizeof(s->scratch) : (size_t)left;
-                rc = overlay_container_write(s, off, s->scratch, chunk);
-                if (rc)
-                    return overlay_diag_fail(s, 10, rc, -1);
-                off += chunk;
-                left -= chunk;
-            }
-            o->next_id = HFS_OVL_ID_BASE;
-            o->generation = 0;
-            o->header_recovered = 0;
-            rc = overlay_sync_bitmap(s);
-            if (rc)
-                return overlay_diag_fail(s, 10, rc, -1);
-            rc = overlay_validate(o, &vr);
-            if (rc)
-                return overlay_diag_validation(s, &vr);
-            overlay_rebuild_indexes(o);
-            o->ready = 1;
-            rc = overlay_sync_header(s);
-            if (rc) {
-                o->ready = 0;
-                return overlay_diag_fail(s, 10, rc, -1);
-            }
-            s->diag.ovl_stage = 9;
-            return HFS_RO_OK;
+            zrc = overlay_container_all_zero(s,
+                        (uint64_t)(2u + o->bitmap_blocks) * HFS_OVL_BLOCK,
+                        (uint64_t)(o->entry_blocks + o->cache_blocks) *
+                        HFS_OVL_BLOCK);
+            if (zrc < 0)
+                return overlay_diag_fail(s, 3, zrc, -1);
+            if (!zrc)
+                return overlay_diag_fail(s, 3, HFS_RO_FORMAT, -1);
+            return overlay_init_fresh(s, o, &vr);
         }
     }
+
+    if (o->version == HFS_OVL_VERSION_3 &&
+        o->state == HFS_OVL_STATE_INIT)
+        return overlay_init_fresh(s, o, &vr);
 
     s->diag.ovl_stage = 4; /* validate overlay header */
     if (o->next_id < HFS_OVL_ID_BASE || o->next_id > 0x7fffffffu)
@@ -160,9 +198,13 @@ int overlay_load(struct hfs_state *s)
     /* Read the entry table in chunks.  Reading 320 bytes per slot made
      * startup wait for 2,048 small ATA requests even when only a handful of
      * entries were used. */
-    for (unsigned int base = 0; base < HFS_OVL_MAX_ENTRIES;
+    unsigned int entry_limit = o->version == HFS_OVL_VERSION_3 ?
+                               o->entry_high_water : HFS_OVL_MAX_ENTRIES;
+    if (entry_limit > HFS_OVL_MAX_ENTRIES)
+        entry_limit = HFS_OVL_MAX_ENTRIES;
+    for (unsigned int base = 0; base < entry_limit;
          base += HFS_OVL_READ_CHUNK) {
-        unsigned int count = HFS_OVL_MAX_ENTRIES - base;
+        unsigned int count = entry_limit - base;
         if (count > HFS_OVL_READ_CHUNK)
             count = HFS_OVL_READ_CHUNK;
         s->diag.ovl_stage = 7; /* read a table chunk */

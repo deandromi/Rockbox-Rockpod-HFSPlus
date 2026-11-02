@@ -1,9 +1,9 @@
 # Next steps — V2.1.1 and later
 
-Status: V2.1.1 released and confirmed working on the test iPod Classic 6G.
-Post-V2.1.1: the adapter decomposition is complete, stage 11 diagnostics are
-implemented, and the immutable-container write fast path is in. Host/build
-verified; no device or power measurement has been recorded for these changes.
+Status: V3.0 Beta built from the V2.1.1 hardware baseline. The adapter is
+decomposed, the v3 overlay format and persistent index cache are implemented,
+and the write fast path is in. Host/build verified; no device, power-loss or
+power measurement has been recorded for the v3 changes.
 This file records the deferred hardware work and the current code-quality review
 so it can be picked up later without re-deriving it.
 
@@ -56,33 +56,30 @@ The full current review is in [`agents.md`](../agents.md) §8. Post-decompositio
 state:
 
 1. **The monolith is gone.** `hfsplus_rb.c` was split into I/O, format,
-   allocation, store, validator, loader, namespace, FAT, mount, state,
-   diagnostics and time modules. The largest adapter module is under 500 lines.
-2. **`shadowed[]` reads are centralized.** Every visibility read now goes
-   through `overlay_entry_visible()`; the validator still computes the shadow
-   set. A resolved-entry table or explicit entry mode would remove the remaining
-   write-side coupling.
+   allocation, store, validator, loader, namespace, FAT, index-cache, mount,
+   state, diagnostics and time modules.
+2. **`shadowed[]` reads are centralized.** Every visibility read goes through
+   `overlay_entry_visible()`; the validator still computes the shadow set.
 3. **Legacy compatibility is ad-hoc.** Duplicate names, duplicate
    BASE/tombstone entries and `base_id` without `BASE` are still handled by
    separate branches in the validator.
-4. **The C and Python validators are independent implementations.** They
-   diverged on the exact `base_id`/`BASE` bug. Share fixtures or generate both
-   from one specification.
+4. **The C and Python validators are independent implementations.** Share
+   fixtures or generate both from one specification.
 5. **Endian/bounds helpers are still duplicated** across the reader, partition
    scanner and adapter.
 6. **The write capability model is historical.** `fat_is_readonly()` lies by
    name; consolidate into one explicit write-mode query.
-7. **`overlay_validate()` keeps O(U²) legacy duplicate resolution.** It only
-   matters at a full 2,048-entry overlay; a two-pass key/winner table would
-   remove it.
+7. **`overlay_validate()` still resolves duplicate names with O(U²) work.**
+   Duplicate-ID validation is now independent and hash-based; a two-pass
+   key/winner table would finish the job.
 
 ### Fix first
 
-1. Run the hardware power-loss matrix now that the commit paths are isolated.
-2. Share validator fixtures between C and `overlay_check.py`.
-3. Resolve the remaining legacy entry-mode branches in the validator.
-4. Decide the next efficiency step: persisted directory index or a v3
-   used-slot summary (see [`efficiency.md`](efficiency.md)).
+1. Run the hardware power-loss matrix and device tests on the V3.0 beta.
+2. Add a tested v2→v3 overlay migration tool if existing users need the cache.
+3. Share validator fixtures between C and `overlay_check.py`.
+4. Finish the two-pass duplicate-name resolution.
+5. Measure the v3 cache/high-water power effect on the iFlash device.
 
 Stage 11 diagnostics (reason code + failing slot) were completed after V2.1.1:
 `overlay_validate()` returns a result struct, the debug screen shows the reason
@@ -93,22 +90,21 @@ pairs.
 
 ## Efficiency and power
 
-The disk/CPU audit is in [`efficiency.md`](efficiency.md). Implemented:
+The disk/CPU audit is in [`efficiency.md`](efficiency.md). Implemented in V3.0:
 
-- Overlay container writes no longer revalidate the immutable container fork or
-  reread the native allocation bitmap on every write. Stage 2 validates once;
-  `write_container_inline()` only maps extents.
+- Container writes skip repeated native-bitmap validation.
+- v3 persists the directory/CNID index cache.
+- v3 high-water bounds the entry-table read.
+- A redundant entry sync after realloc was removed.
+- Debug reports cache HIT/MISS and ATA read/write/flush counters.
 
 Still open, in priority order:
 
-1. Firmware mount builds the full directory/CNID index by scanning every
-   catalog leaf record. Persist it or build it lazily.
-2. Overlay mount reads all 2,048 entry slots (640 KiB) even for tiny overlays.
-   A v3 used-slot summary is the clean fix.
-3. ATA flushes are part of the durability contract; batching them needs a
-   WAL/commit-group design and the power-loss matrix.
-4. `overlay_validate()` and readdir have CPU-only hotspots that matter mainly
-   for large overlays/directories.
+1. Existing v2 containers do not get the v3 cache without a migration tool.
+2. ATA flush batching still needs a WAL/commit-group design and the hardware
+   power-loss matrix.
+3. Full duplicate-name resolution is still O(U²).
+4. Readdir hidden-name caching remains a low-priority optimization.
 
 Do not trade crash consistency for power without the hardware matrix.
 

@@ -8,6 +8,8 @@
 
 int overlay_container_read(struct hfs_state *s, uint64_t off,
                            void *buffer, size_t length);
+int overlay_container_all_zero(struct hfs_state *s, uint64_t off,
+                               uint64_t length);
 int overlay_container_write(struct hfs_state *s, uint64_t off,
                             const void *buffer, size_t length);
 uint64_t overlay_entry_offset(const struct hfs_overlay *o,

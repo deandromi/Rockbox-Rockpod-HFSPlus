@@ -40,7 +40,9 @@ static inline void fill_overlay_fatent(const struct hfs_overlay_entry *e,
     fatent->attr = e->kind == 1 ? ATTR_DIRECTORY : ATTR_ARCHIVE;
     fatent->filesize = e->kind == 2 ? (uint32_t)e->size : 0;
     fatent->firstcluster = (int32_t)e->id;
-    set_fat_time(fatent, hfs_time_to_unix(e->mtime));
+    /* Overlay mtime is stored as Unix seconds; native HFS+ dates use the
+     * 1904 epoch and are converted by their callers. */
+    set_fat_time(fatent, (time_t)e->mtime);
 }
 
 #endif

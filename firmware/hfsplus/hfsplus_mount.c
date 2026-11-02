@@ -10,6 +10,7 @@
 #include "hfsplus_io.h"
 #include "hfsplus_overlay_format.h"
 #include "hfsplus_overlay_load.h"
+#include "hfsplus_index_cache.h"
 #include "hfsplus_partition.h"
 #include "storage.h"
 #include "mutex.h"
@@ -155,10 +156,17 @@ int hfsplus_partitions(int drive, struct partinfo *parts, int capacity,
 static int hfsplus_mount_indexes(struct hfs_state *s)
 {
 #ifndef BOOTLOADER
-    /* The bootloader loads one firmware path.  Building the full directory
-     * and CNID indexes there only delays startup. */
-    return hfs_ro_enable_fast_index(&s->volume, s->catalog_cache,
-                                    sizeof(s->catalog_cache));
+    /* A v3 overlay may carry a validated directory/CNID index cache.  The
+     * bootloader never builds or uses indexes. */
+    int rc = hfs_index_cache_load(s);
+    s->diag.index_cache = rc == HFS_RO_OK;
+    if (!rc)
+        return HFS_RO_OK;
+    rc = hfs_ro_enable_fast_index(&s->volume, s->catalog_cache,
+                                  sizeof(s->catalog_cache));
+    if (!rc)
+        (void)hfs_index_cache_save(s);
+    return rc;
 #else
     (void)s;
     return HFS_RO_OK;
@@ -199,6 +207,8 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
     s->diag.ovl_stage = 0;
     s->diag.ovl_slot = -1;
     s->diag.ovl_reason = (int)HFS_OVL_REASON_NONE;
+    s->diag.index_cache = 0;
+    s->diag.flush_ops = 0;
     s->force_readonly = 0;
     int rc = setup_io(&s->io, drive);
     if (rc) {
@@ -237,9 +247,9 @@ int hfsplus_mount(int volume, int drive, sector_t start, sector_t count)
     rc = hfs_ro_mount(&s->volume, device_read, &s->io, base, length,
                       s->scratch, sizeof(s->scratch));
     if (!rc)
-        rc = hfsplus_mount_indexes(s);
-    if (!rc)
         hfsplus_mount_overlay(s);
+    if (!rc)
+        rc = hfsplus_mount_indexes(s);
     if (rc) {
         /* Never leave a partially initialized volume published as mounted. */
         memset(&s->overlay, 0, sizeof(s->overlay));
@@ -262,8 +272,13 @@ void hfsplus_unmount(int volume)
         struct hfs_state *s = &hfs_states[volume];
         if (s->overlay.ready && s->overlay.header_dirty) {
             mutex_lock(&s->mutex);
-            overlay_sync_header(s);
-            s->overlay.header_dirty = 0;
+            int rc = overlay_sync_header(s);
+            if (!rc)
+                s->overlay.header_dirty = 0;
+            else {
+                s->diag.ovl_error = rc;
+                s->diag.ovl_stage = 10;
+            }
             mutex_unlock(&s->mutex);
         }
         memset(&s->overlay, 0, sizeof(s->overlay));

@@ -463,6 +463,131 @@ int hfs_ro_enable_fast_index(struct hfs_ro_volume *v, void *cache,
     return build_dir_index(v);
 }
 
+
+static uint32_t idx_le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+           (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static uint64_t idx_le64(const uint8_t *p)
+{
+    return (uint64_t)idx_le32(p) | (uint64_t)idx_le32(p + 4) << 32;
+}
+
+static void idx_put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static void idx_put64(uint8_t *p, uint64_t v)
+{
+    idx_put32(p, (uint32_t)v);
+    idx_put32(p + 4, (uint32_t)(v >> 32));
+}
+
+static uint32_t idx_checksum(const uint8_t *data, size_t size)
+{
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < size; ++i) {
+        if (i >= 52 && i < 56)
+            continue; /* checksum field */
+        h ^= data[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+uint64_t hfs_ro_fast_index_generation(const struct hfs_ro_volume *v)
+{
+    if (!v)
+        return 0;
+    uint64_t g = (uint64_t)v->write_count << 32;
+    g ^= v->modify_date;
+    g ^= v->catalog.size * 0x9e3779b97f4a7c15ull;
+    g ^= (uint64_t)v->catalog.blocks << 17;
+    g ^= (uint64_t)v->total_nodes << 7;
+    g ^= v->leaf_records;
+    g ^= (uint64_t)v->attributes << 3;
+    return g;
+}
+
+int hfs_ro_fast_index_export(const struct hfs_ro_volume *v, void *data,
+                             size_t size, size_t *used)
+{
+    if (!v || !v->mounted || !data || !used)
+        return HFS_RO_ARGUMENT;
+    uint32_t dir_bytes = (uint32_t)v->dir_index_count *
+                         (uint32_t)sizeof(struct hfs_ro_dirloc);
+    uint32_t cnid_bytes = (uint32_t)sizeof(v->cnid_index);
+    size_t need = HFS_RO_INDEX_HEADER + dir_bytes + cnid_bytes;
+    if (size < need)
+        return HFS_RO_BUFFER;
+    uint8_t *p = data;
+    memset(p, 0, HFS_RO_INDEX_HEADER);
+    memcpy(p, HFS_RO_INDEX_MAGIC, 6);
+    idx_put32(p + 8, HFS_RO_INDEX_VERSION);
+    idx_put32(p + 12, HFS_RO_INDEX_HEADER);
+    idx_put64(p + 16, hfs_ro_fast_index_generation(v));
+    idx_put32(p + 24, v->dir_index_count);
+    idx_put32(p + 28, v->dir_index_complete ? 1u : 0u);
+    idx_put32(p + 32, v->cnid_index_count);
+    idx_put32(p + 36, v->cnid_index_complete ? 1u : 0u);
+    idx_put32(p + 40, dir_bytes);
+    idx_put32(p + 44, cnid_bytes);
+    idx_put32(p + 48, (uint32_t)need);
+    memcpy(p + HFS_RO_INDEX_HEADER, v->dir_index, dir_bytes);
+    memcpy(p + HFS_RO_INDEX_HEADER + dir_bytes, v->cnid_index, cnid_bytes);
+    idx_put32(p + 52, idx_checksum(p, need));
+    *used = need;
+    return HFS_RO_OK;
+}
+
+int hfs_ro_fast_index_import(struct hfs_ro_volume *v, void *cache,
+                             size_t cache_size, const void *data, size_t size)
+{
+    if (!v || !v->mounted || !cache || !data)
+        return HFS_RO_ARGUMENT;
+    if (size < HFS_RO_INDEX_HEADER || cache_size < v->node_size)
+        return HFS_RO_BUFFER;
+    const uint8_t *p = data;
+    if (memcmp(p, HFS_RO_INDEX_MAGIC, 6) ||
+        idx_le32(p + 8) != HFS_RO_INDEX_VERSION ||
+        idx_le32(p + 12) != HFS_RO_INDEX_HEADER)
+        return HFS_RO_FORMAT;
+    uint64_t generation = idx_le64(p + 16);
+    uint32_t dir_count = idx_le32(p + 24);
+    uint32_t dir_complete = idx_le32(p + 28);
+    uint32_t cnid_count = idx_le32(p + 32);
+    uint32_t cnid_complete = idx_le32(p + 36);
+    uint32_t dir_bytes = idx_le32(p + 40);
+    uint32_t cnid_bytes = idx_le32(p + 44);
+    uint32_t used = idx_le32(p + 48);
+    if (generation != hfs_ro_fast_index_generation(v) ||
+        dir_count > HFS_RO_DIR_INDEX_MAX ||
+        cnid_count > HFS_RO_CNID_INDEX_MAX ||
+        dir_complete > 1 || cnid_complete > 1 ||
+        dir_bytes != dir_count * sizeof(struct hfs_ro_dirloc) ||
+        cnid_bytes != sizeof(v->cnid_index) ||
+        used != HFS_RO_INDEX_HEADER + dir_bytes + cnid_bytes ||
+        used > size || idx_le32(p + 52) != idx_checksum(p, used))
+        return HFS_RO_FORMAT;
+
+    v->catalog_cache = cache;
+    v->catalog_cache_size = cache_size;
+    v->catalog_cache_node = UINT32_MAX;
+    v->dir_index_count = (uint16_t)dir_count;
+    v->dir_index_complete = (uint8_t)dir_complete;
+    v->cnid_index_count = (uint16_t)cnid_count;
+    v->cnid_index_complete = (uint8_t)cnid_complete;
+    memcpy(v->dir_index, p + HFS_RO_INDEX_HEADER, dir_bytes);
+    memcpy(v->cnid_index, p + HFS_RO_INDEX_HEADER + dir_bytes, cnid_bytes);
+    return HFS_RO_OK;
+}
+
 static int read_catalog_header(struct hfs_ro_volume *v)
 {
     uint8_t prefix[120];
@@ -522,6 +647,8 @@ static int parse_volume_header(struct hfs_ro_volume *v, const uint8_t *header,
     if (be16(header) != 0x482b || be16(header + 2) != 4)
         return HFS_RO_UNSUPPORTED;
     v->attributes = be32(header + 4);
+    v->modify_date = be32(header + 20);
+    v->write_count = be32(header + 68);
     v->block_size = be32(header + 40);
     v->blocks = be32(header + 44);
     v->free_blocks = be32(header + 48);

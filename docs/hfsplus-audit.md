@@ -1,6 +1,10 @@
 # HFS+ implementation audit log
 
-Status: **V2.0 fixes applied; six documented format/compatibility limits remain (see `BUGFIXES.md`).** This log records confirmed and code-confirmed findings from a line-by-line audit of the custom HFS+ layer and its integration points.
+Status: **audit history through V3.0 Beta; six documented
+format/compatibility limits remain (see `BUGFIXES.md`).** The prose below records
+findings at discovery time and is intentionally historical; current status
+lives in `BUGFIXES.md` and the release notes. V3.0 Beta is host/build verified
+and awaits device/power validation.
 
 Date started: 2026-11-01.
 Scope: `firmware/hfsplus/*`, `firmware/export/hfsplus_rb.h`, the HFS+ hooks in `firmware/common/{disk,fat,file,file_internal}.c`, `bootloader/ipod-s5l87xx.c`, `tools/hfsplus`, `tools/rockpod`, and the HFS+-specific diagnostics.

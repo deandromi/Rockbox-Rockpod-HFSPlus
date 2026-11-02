@@ -50,6 +50,7 @@ int storage_write_sectors(sector_t start, int count, const void *buf)
     return 0;
 }
 
+int storage_flush(void) { return 0; }
 void mutex_init(struct mutex *m) { (void)m; }
 void mutex_lock(struct mutex *m) { (void)m; }
 void mutex_unlock(struct mutex *m) { (void)m; }
@@ -330,6 +331,8 @@ static int test_timestamps(void)
     CHECK(hfsplus_create_file(&root, "stamp.txt", ATTR_ARCHIVE, &file,
                               &e) == 0);
     CHECK(e.wrtdate != 0 && e.wrttime != 0);
+    /* The host clock is fixed at 2026; a Unix/HFS epoch mix would show 1980. */
+    CHECK((e.wrtdate >> 9) + 1980 >= 2020);
     hfsplus_unmount(0);
     return 0;
 }
@@ -427,6 +430,9 @@ static int test_diag(void)
            hfsplus_overlay_last_slot(), reason,
            hfsplus_overlay_reason_name(reason),
            (unsigned long)hfsplus_overlay_diag_id());
+    printf("index_cache=%d\n", hfsplus_index_cache_used(0));
+    printf("io_reads=%u io_writes=%u io_flushes=%u\n",
+           hfsplus_io_reads(0), hfsplus_io_writes(0), hfsplus_io_flushes(0));
     hfsplus_unmount(0);
     return 0;
 }

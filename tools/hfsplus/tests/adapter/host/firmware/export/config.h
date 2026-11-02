@@ -16,6 +16,7 @@
 #define HAVE_LBA48 1
 #define ROCKBOX_LITTLE_ENDIAN 1
 #define HAVE_HFSPLUS_RO 1
+#define HAVE_STORAGE_FLUSH 1
 #define MODEL_NAME "host"
 #define TARGET_ID 71
 #endif

@@ -1495,6 +1495,10 @@ static int disk_callback(int btn, struct gui_synclist *lists)
     simplelist_addline("Overlay slot: %d", ovl_slot);
     simplelist_addline("Overlay reason: %d %s", ovl_reason,
                        hfsplus_overlay_reason_name(ovl_reason));
+    simplelist_addline("Index cache: %s",
+                       hfsplus_index_cache_used(0) ? "HIT" : "MISS");
+    simplelist_addline("I/O r/w/f: %u/%u/%u", hfsplus_io_reads(0),
+                       hfsplus_io_writes(0), hfsplus_io_flushes(0));
     if (ovl_stage >= 8 && ovl_slot >= 0) {
         simplelist_addline("Ovl id/parent: %08lx/%08lx",
             (unsigned long)hfsplus_overlay_diag_id_vol(0),
