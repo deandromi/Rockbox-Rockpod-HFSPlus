@@ -24,7 +24,8 @@ firmware. A full install uses both asset groups.
 Because this is not a scented-candle optimization pass. Thermonuclear fuel has
 the highest energy density we know how to build, and that is the whole joke:
 this release tries to get more useful work out of every joule, ATA transaction,
-PMU write, catalog scan and tag read. Same battery, fewer wasted reactions.
+PMU write, catalog scan and tag read. Same battery capacity, fewer wasted
+reactions — and on the test iPod, almost two more hours of runtime.
 
 The safety analogy is the serious half. The reaction is contained in
 `/.rockpod-rw`; native HFS+ is the shielding and is never written; a bad state
@@ -43,7 +44,23 @@ below, so please keep a backup even though this is no longer a beta.
 | Album art | Per-directory positive/negative result cache for external art. Track-specific art is still checked first and is never cached. | Folder art is not re-probed for every track in the same album. |
 | Playback startup | Redundant track-load existence checks were removed; the playlist viewer only parses metadata for title display modes; read-only streams use a 4 KiB read-ahead window. | Less repeated metadata work when starting tracks and browsing playlists; small metadata reads need fewer ATA transactions. |
 | Diagnostics | `Debug → Disk Info` reports index-cache HIT/MISS, high-water, per-operation create/write/close/rename/remove/settings counts, and flush attribution. | You can see whether the cache is warm and where overlay operations/flushes are going. |
-| Power experiments | The V3.2 ATA/backlight power experiment was not shipped. Stable V3.2 keeps the known-good V3.1 power behavior; the lineout-volume write cache remains. | No battery-improvement claim. This release is about correctness, file compatibility and removing wasted work, not a new power state machine. |
+| Power and battery life | The experimental ATA/backlight power state machine was not shipped; stable V3.2 keeps the known-good V3.1 power path. The efficiency work is in fewer ATA transactions, catalog scans, tag lookups and overlay flushes. | Owner-reported on the test iPod: almost **2 hours longer battery life**. V3.0 introduced most of the architectural savings; V3.2 fixes the V3.0-era bugs that masked them, so the improvement is finally noticeable in daily use. See the battery note below. |
+
+## Battery life
+
+Owner-reported result on the affected iPod Classic 6G with iFlash SD: almost
+**two hours longer runtime** with V3.2 than before.
+
+V3.0 did most of the architectural efficiency work — the v3 overlay, persistent
+index cache, high-water entry reads and reduced validation. V3.2 fixes the
+V3.0-era bugs and regressions that kept those savings from being felt, and adds
+further work on path lookup, tagcache/album-art locality, overlay batching and
+read-only stream reads. The result is that the same efficiency is finally
+visible in daily use, including battery life.
+
+This is a single-device owner observation, not a controlled power measurement.
+The formal P0 power-loss matrix, native-integrity stress run and 100-cycle
+SSD/spindown test remain unexecuted.
 
 ## Compatibility and upgrade notes
 
