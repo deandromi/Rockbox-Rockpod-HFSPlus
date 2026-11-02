@@ -1,6 +1,6 @@
 # Rockpod HFS+
 
-**V3.0 // Version V13.0**
+**V3.0 // Version V13.0 and V2.0-Final**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
