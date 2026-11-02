@@ -300,7 +300,7 @@ struct simplelist_info {
     void *callback_data; /* data for callbacks */
 };
 
-#define SIMPLELIST_MAX_LINES 32
+#define SIMPLELIST_MAX_LINES 64
 #ifdef HAVE_ATA_SMART
 #define SIMPLELIST_MAX_LINELENGTH 48
 #else

@@ -1,6 +1,6 @@
 # Rockpod HFS+
 
-**V3.0 Beta // Version V13.0**
+**V3.0 Beta 2 // Version V13.0**
 
 Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
@@ -20,9 +20,9 @@ FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as o
 | Safe transfer mode | **Apple Disk Mode** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
-| Release | [V3.0 Beta](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0-beta) |
+| Release | [V3.0 Beta 2](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0-beta2) |
 
-V3.0 Beta decomposes the adapter, adds the v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps and initialization fail-closed behavior. Existing v1/v2 overlays remain readable; new containers initialize as v3. See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0-beta.md`](docs/release-v3.0-beta.md).
+V3.0 Beta 2 decomposes the adapter, adds the v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixes overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. Existing v1/v2 overlays remain readable; new containers initialize as v3. The Beta 2 update is firmware-only; the bootloader is unchanged. See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0-beta2.md`](docs/release-v3.0-beta2.md).
 
 ## Compatibility and limits
 
@@ -103,7 +103,7 @@ First verify the image:
 shasum -a 256 bootloader-ipod6g.ipod
 ```
 
-Expected V3.0 Beta hash:
+Expected V3.0 Beta 2 bootloader hash:
 
 ```text
 e398b95d087dfb676fbc6dbc21c46445bbe47e6ef6ba84d8b6ef80e0f3ec4359
@@ -407,7 +407,7 @@ make -C tools/hfsplus sanitize
 python3 tools/hfsplus/tests/check_integration.py
 ```
 
-V3.0 Beta passes 20 reader tests, 7 partition tests and 30 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.0-beta.md`](docs/release-v3.0-beta.md).
+V3.0 Beta 2 passes 20 reader tests, 7 partition tests and 30 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.0-beta2.md`](docs/release-v3.0-beta2.md).
 
 ## License and credits
 

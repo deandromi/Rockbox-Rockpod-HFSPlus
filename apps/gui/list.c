@@ -877,9 +877,9 @@ int simplelist_get_line_count(void)
 /* set/edit a line pointer in the list. */
 void simplelist_setline(const char *text)
 {
-    int line_number = simplelist_line_count++;
     if (simplelist_line_count >= SIMPLELIST_MAX_LINES)
-        simplelist_line_count = 0;
+        return;
+    int line_number = simplelist_line_count++;
     simplelist_text[line_number] = text;
 }
 
@@ -889,17 +889,24 @@ void simplelist_setline(const char *text)
 void simplelist_addline(const char *fmt, ...)
 {
     va_list ap;
-    size_t len = simplelist_line_remaining;
+    size_t remaining = simplelist_line_remaining;
+    if (!remaining || simplelist_line_count >= SIMPLELIST_MAX_LINES)
+        return;
 
     char *bufpos = &simplelist_buffer[simplelist_line_pos];
     simplelist_setline(bufpos);
 
     va_start(ap, fmt);
-    len = vsnprintf(bufpos, simplelist_line_remaining, fmt, ap);
+    size_t len = vsnprintf(bufpos, remaining, fmt, ap);
     va_end(ap);
+    if (len >= remaining) {
+        simplelist_line_pos += (int)remaining;
+        simplelist_line_remaining = 0;
+        return;
+    }
     len++;
-    simplelist_line_remaining -= len;
-    simplelist_line_pos += len;
+    simplelist_line_remaining -= (int)len;
+    simplelist_line_pos += (int)len;
 }
 
 static const char* simplelist_static_getname(int item,

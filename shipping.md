@@ -1,8 +1,8 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Release identity: **Rockpod HFS+ — V3.0 Beta // Version V13.0**.
-Internal version file: `docs/VERSION` = `3.0.0-beta-v13.0`.
+Release identity: **Rockpod HFS+ — V3.0 Beta 2 // Version V13.0**.
+Internal version file: `docs/VERSION` = `3.0.0-beta2-v13.0`.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
 Platform: macOS for build and installation. Windows/Linux installation is out of scope.
 Companion document: `agents.md` (architecture, invariants, code-quality review).
@@ -84,8 +84,8 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 
 ### 1.3 Naming
 
-- Public name: **V3.0 Beta // Version V13.0**.
-- `docs/VERSION`: `3.0.0-beta-v13.0`.
+- Public name: **V3.0 Beta 2 // Version V13.0**.
+- `docs/VERSION`: `3.0.0-beta2-v13.0`.
 - Built firmware version appends the UTC build date, e.g. `1.0-v12.0-261101`.
 - Internal overlay magic/version: `RPOVL11`/`RPOVL12`/`RPOVL13`, format versions 1/2/3. This is **not** the public release number. New containers initialize as v3.
 - The bootloader diagnostic text `HFS+ v8 ...` is an old label, not a release or bootloader version.
