@@ -890,6 +890,14 @@ LUN. The host may mount it read-only, copy files off and read
 `/.rockpod-rw` for overlay diagnostics. SCSI WRITE commands return DATA
 PROTECT, and SYNCHRONIZE CACHE flushes the ATA cache at the handoff boundaries.
 
+The USB view relabels the HFS+ data partition as `Apple_HFS` in the MBR read
+buffer even when the raw MBR type is still `0x0B`/`0x0C`. This is a RAM-only
+presentation fix; native MBR bytes are never modified. macOS selects the
+filesystem by partition type, so without it the HFS+ volume is reported as
+unreadable. The partition geometry is cached before USB mode unmounts the
+volume, so the relabel survives the unmount. `MODE SENSE(10)` returns the
+8-byte write-protect header used by macOS, with `MODE SENSE(6)` as fallback.
+
 Operational rules:
 
 - Use Apple Disk Mode for all writes, backups, database builds and repairs.
@@ -1137,8 +1145,8 @@ Known issues:
 - Mac .pfraw filenames now use <Untagged> consistently (HFS-075, V1.1).
 - Adapter write path lacks a committed host integration test.
 - One iPod Classic 6G tested; other revisions/adapters unverified.
-- Stock Rockbox USB mass-storage corruption is a separate upstream issue;
-  use Apple Disk Mode for transfers.
+- Rockbox USB is now a read-only LUN in HFS+ builds; use Apple Disk Mode for
+  writes. The USB MBR view relabels the data partition as Apple_HFS in RAM.
 ```
 
 ---

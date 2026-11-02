@@ -21,7 +21,7 @@ Please make a decision between picking either: the newer post V2 releases or the
 | Target | iPod Classic 6G / `ipod6g` (target ID 71) |
 | Filesystem | HFS+ version 4; APFS and HFSX are not supported |
 | Boot | Separate HFS+-aware bootloader in NOR flash |
-| Safe transfer mode | **Apple Disk Mode; Rockbox-USB Mass Storage mode causes corruption, not a Rockpod-HFS+ related issue** |
+| Safe transfer mode | **Apple Disk Mode for writes; Rockbox USB mass storage is read-only** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
 | Release | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
@@ -41,7 +41,7 @@ require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then 
 - Resource forks, symlinks, hardlinks, compression, encryption and HFS wrappers are unsupported.
 - The `ipod6g` build supports one HFS+ data partition. Extended/logical MBR partitions are not traversed.
 - Overlay: 1 GiB recommended, 16 MiB minimum, 2 GiB maximum, 2,048 entries. The container cannot be resized in place. Keep bulk music in the native HFS+ library.
-- **Rockbox USB mass storage is read-only in HFS+ builds.** It is safe for browsing, copying files off and reading `/.rockpod-rw` diagnostics, but host writes are rejected. Use Apple Disk Mode to add, change or delete files.
+- **Rockbox USB mass storage is read-only in HFS+ builds.** It is safe for browsing, copying files off and reading `/.rockpod-rw` diagnostics, but host writes are rejected. The USB view presents the data partition as `Apple_HFS` even when the raw MBR type is stale; the native MBR is never changed. Use Apple Disk Mode to add, change or delete files.
 - Do **not** use on-device **Database Initialize/Update** or PictureFlow **Rebuild/Update Cache**. Use the Mac workflow below.
 - `.rockbox` is a dot directory: use **Show Files → All** in Rockbox and `Cmd+Shift+.` in Finder.
 
@@ -345,7 +345,7 @@ sync
 diskutil eject "/Volumes/IPOD"
 ```
 
-Install a new bootloader only when the release notes say so. After adding or retagging music, repeat the mandatory database step and, if used, the optional Cover Flow step. Use Apple Disk Mode, never Rockbox USB mode.
+Install a new bootloader only when the release notes say so. After adding or retagging music, repeat the mandatory database step and, if used, the optional Cover Flow step. Use Apple Disk Mode for writes; Rockbox USB is read-only.
 
 ## Recovery
 

@@ -28,6 +28,9 @@
 #include "storage.h"
 #include "disk.h"
 #include "fs_defines.h"
+#ifdef HAVE_HFSPLUS_RO
+#include "hfsplus_rb.h"
+#endif
 /* Needed to get at the audio buffer */
 #include "audio.h"
 #include "usb_storage.h"
@@ -240,6 +243,16 @@ struct mode_sense_data_10 {
     struct mode_sense_bdesc_longlba block_descriptor;
 } __attribute__ ((packed));
 
+struct mode_sense_data_10_short {
+    unsigned short mode_data_length;
+    unsigned char medium_type;
+    unsigned char device_specific;
+    unsigned char longlba;
+    unsigned char reserved;
+    unsigned short block_descriptor_length;
+    struct mode_sense_bdesc_shortlba block_descriptor;
+} __attribute__ ((packed));
+
 struct mode_sense_data_6 {
     unsigned char mode_data_length;
     unsigned char medium_type;
@@ -293,6 +306,7 @@ static union {
     struct sense_data *sense_data;
     struct mode_sense_data_6 *ms_data_6;
     struct mode_sense_data_10 *ms_data_10;
+    struct mode_sense_data_10_short *ms_data_10_short;
     struct report_lun_data *lun_data;
     struct command_status_wrapper* csw;
     char *max_lun;
@@ -305,6 +319,7 @@ static struct {
     unsigned int count;
     unsigned int cur_cmd;
     unsigned int block_size;
+    unsigned int usb_block_size;
     unsigned int tag;
     unsigned int lun;
     unsigned char *data[2];
@@ -318,6 +333,18 @@ static struct {
     unsigned char asc;
     unsigned char ascq;
 } cur_sense_data;
+
+#if defined(HAVE_HFSPLUS_RO) && !defined(SIMULATOR)
+/* The HFS+ MBR view is corrected in RAM before the host sees LBA 0. */
+static void usb_storage_fix_mbr(void)
+{
+    if (cur_cmd.sector == 0)
+        hfsplus_usb_fix_mbr(cur_cmd.data[cur_cmd.data_select],
+                            cur_cmd.usb_block_size);
+}
+#undef USBSTOR_READ_SECTORS_FILTER
+#define USBSTOR_READ_SECTORS_FILTER() ({ usb_storage_fix_mbr(); 0; })
+#endif
 
 static void handle_scsi(struct command_block_wrapper* cbw);
 static void send_csw(int status);
@@ -843,6 +870,7 @@ static void handle_scsi(struct command_block_wrapper* cbw)
 
     uint32_t bsize = block_size*block_size_mult;
     sector_t bcount = block_count/block_size_mult;
+    cur_cmd.usb_block_size = bsize;
 
     cur_cmd.tag = cbw->tag;
     cur_cmd.lun = lun;
@@ -932,56 +960,19 @@ static void handle_scsi(struct command_block_wrapper* cbw)
             /*unsigned char pc = (cbw->command_block[2] & 0xc0) >>6;*/
             unsigned char page_code = cbw->command_block[2] & 0x3f;
             logf("scsi mode_sense_10 %d %X",lun,page_code);
-            switch(page_code) {
-                case 0x3f:
-                    tb.ms_data_10->mode_data_length =
-                        htobe16(sizeof(struct mode_sense_data_10)-2);
-                    tb.ms_data_10->medium_type = 0;
-                    tb.ms_data_10->device_specific =
-                        USB_STORAGE_READ_ONLY ? 0x80 : 0;
-                    tb.ms_data_10->reserved = 0;
-                    tb.ms_data_10->longlba = 1;
-                    tb.ms_data_10->block_descriptor_length =
-                        htobe16(sizeof(struct mode_sense_bdesc_longlba));
-
-                    memset(tb.ms_data_10->block_descriptor.reserved,0,4);
-
-#ifdef STORAGE_64BIT_SECTOR
-                    tb.ms_data_10->block_descriptor.num_blocks[2] =
-                        (bcount & 0xff00000000ULL)>>40;
-                    tb.ms_data_10->block_descriptor.num_blocks[3] =
-                        (bcount & 0x00ff000000ULL)>>32;
-#else
-                    tb.ms_data_10->block_descriptor.num_blocks[2] = 0;
-                    tb.ms_data_10->block_descriptor.num_blocks[3] = 0;
-#endif
-                    tb.ms_data_10->block_descriptor.num_blocks[4] =
-                        (bcount & 0xff000000)>>24;
-                    tb.ms_data_10->block_descriptor.num_blocks[5] =
-                        (bcount & 0x00ff0000)>>16;
-                    tb.ms_data_10->block_descriptor.num_blocks[6] =
-                        (bcount & 0x0000ff00)>>8;
-                    tb.ms_data_10->block_descriptor.num_blocks[7] =
-                        (bcount & 0x000000ff);
-
-                    tb.ms_data_10->block_descriptor.block_size[0] =
-                        (bsize & 0xff000000)>>24;
-                    tb.ms_data_10->block_descriptor.block_size[1] =
-                        (bsize & 0x00ff0000)>>16;
-                    tb.ms_data_10->block_descriptor.block_size[2] =
-                        (bsize & 0x0000ff00)>>8;
-                    tb.ms_data_10->block_descriptor.block_size[3] =
-                        (bsize & 0x000000ff);
-                    send_command_result(tb.ms_data_10,
-                            MIN(sizeof(struct mode_sense_data_10), length));
-                    break;
-                default:
-                    send_command_failed_result();
-                    cur_sense_data.sense_key=SENSE_ILLEGAL_REQUEST;
-                    cur_sense_data.asc=ASC_INVALID_FIELD_IN_CBD;
-                    cur_sense_data.ascq=0;
-                    break;
-            }
+            (void)page_code;
+            /* macOS asks for 8 bytes and only reads the write-protect bit in
+             * byte 3.  Return a valid 8-byte header with no block
+             * descriptors; this avoids descriptor-unit and page-code
+             * mismatches entirely. */
+            struct mode_sense_data_10_short *m = tb.ms_data_10_short;
+            memset(m, 0, sizeof(*m));
+            m->mode_data_length = htobe16(6);
+            m->medium_type = 0;
+            m->device_specific = USB_STORAGE_READ_ONLY ? 0x80 : 0;
+            m->longlba = 0;
+            m->block_descriptor_length = 0;
+            send_command_result(m, MIN(8u, length));
             break;
         }
 

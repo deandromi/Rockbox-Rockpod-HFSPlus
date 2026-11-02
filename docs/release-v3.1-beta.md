@@ -1,5 +1,8 @@
 # Rockpod HFS+ V3.1 Beta — read-only Rockbox USB
 
+> **Superseded by [V3.1 Beta 5](release-v3.1-beta5.md).** Beta 1 had a
+> bulk-only write-rejection bug and did not present the HFS+ MBR type.
+
 Release tag: `v3.1-beta`
 Public version string: `3.1.0-beta-v13.0`
 Status: **beta** — firmware/build verified; macOS/iFlash USB mounting still needs

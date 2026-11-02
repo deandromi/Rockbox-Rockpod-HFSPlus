@@ -33,6 +33,7 @@ enum hfs_overlay_reason {
 void hfsplus_init(void);
 bool hfsplus_mounted(int volume);
 int hfsplus_mount(int volume, int drive, sector_t start, sector_t count);
+void hfsplus_usb_fix_mbr(unsigned char *mbr, unsigned int unit);
 void hfsplus_unmount(int volume);
 int hfsplus_partitions(int drive, struct partinfo *parts, int capacity,
                        int *multiplier);

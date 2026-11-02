@@ -62,6 +62,19 @@ HFS+ firmware builds expose Rockbox USB mass storage as a write-protected LUN.
 - Confirm SYNCHRONIZE CACHE and clean disconnect leave the volume clean.
 - Apple Disk Mode remains the only supported path for writes, backups and repairs.
 
+Recorded run, 2026-11-02 (iPod Classic 6G + iFlash, V3.1 Beta 5):
+
+- macOS listed `disk4s1` as `Apple_HFS` at offset 67,624,960 with 4096-byte
+  blocks and mounted `/Volumes/IPOD` with the `read-only` flag.
+- Media/volume read-only was reported as `Yes`.
+- `rockbox.ipod` copied off the volume and its SHA-256 matched the build.
+- A host `touch` failed with `Read-only file system`.
+- `/.rockpod-rw` copied off and validated as `RPOVL13` with 15 live entries.
+- `diskutil verifyVolume /Volumes/IPOD` completed with exit 0.
+- `MODE_SENSE_10` logged one transient retry during enumeration; the volume
+  mounted and the write-protect state was correct. Direct SCSI DATA PROTECT
+  was not exercised because the host honored the read-only mount.
+
 ### 7. Bootloader and DFU recovery
 
 - Install the Thumb bootloader over DFU; verify success tones and reboot.

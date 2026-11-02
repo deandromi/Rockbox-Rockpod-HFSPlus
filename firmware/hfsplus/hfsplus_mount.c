@@ -22,11 +22,15 @@ static struct hfs_io scan_io;
 static int scan_had_hfs;
 static int last_error;
 static int last_stage;
+static uint64_t usb_hfs_offset;
+static uint32_t usb_hfs_unit;
 
 void hfsplus_init(void)
 {
     last_error = 0;
     last_stage = 0;
+    usb_hfs_offset = 0;
+    usb_hfs_unit = 0;
     for (unsigned int i = 0; i < HFS_NUM_VOLUMES; ++i) {
         hfs_ro_unmount(&hfs_states[i].volume);
         memset(&hfs_states[i].overlay, 0, sizeof(hfs_states[i].overlay));
@@ -40,6 +44,54 @@ void hfsplus_init(void)
 bool hfsplus_mounted(int volume)
 {
     return (unsigned int)volume < HFS_NUM_VOLUMES && hfs_states[volume].volume.mounted;
+}
+
+/* Present the HFS+ data partition as Apple_HFS in the USB MBR view.
+ *
+ * Some iPods were formatted over an existing FAT32 partition, so the raw MBR
+ * still says 0x0B/0x0C even though the partition now contains HFS+.  Apple
+ * Disk Mode synthesizes an Apple_HFS MBR; a plain whole-disk USB export does
+ * not, and macOS then tries FAT and reports the disk as unreadable.  Patch
+ * only the in-memory sector that is sent to the host: native MBR bytes are
+ * never modified. */
+void hfsplus_usb_fix_mbr(unsigned char *mbr, unsigned int unit)
+{
+    if (!mbr || !unit || unit < 512 || (unit & (unit - 1)))
+        return;
+
+    uint64_t base = usb_hfs_offset;
+    if (!base && hfs_states[0].volume.mounted)
+        base = hfs_states[0].volume.base;
+    if (!base)
+        return;
+
+    int fallback = -1;
+    uint32_t fallback_blocks = 0;
+    for (unsigned int i = 0; i < 4; ++i) {
+        unsigned char *p = mbr + 446 + i * 16;
+        if (p[4] != 0x0b && p[4] != 0x0c)
+            continue;
+        uint32_t start = (uint32_t)p[8] | (uint32_t)p[9] << 8 |
+                         (uint32_t)p[10] << 16 | (uint32_t)p[11] << 24;
+        uint32_t blocks = (uint32_t)p[12] | (uint32_t)p[13] << 8 |
+                          (uint32_t)p[14] << 16 | (uint32_t)p[15] << 24;
+        if (!start || !blocks)
+            continue;
+        if ((uint64_t)start * unit == base) {
+            p[4] = 0xaf;
+            return;
+        }
+        if (blocks > fallback_blocks) {
+            fallback = (int)i;
+            fallback_blocks = blocks;
+        }
+    }
+
+    /* The USB block unit can differ from the MBR unit during a mode change.
+     * In that case the mounted HFS+ volume is still the largest FAT-typed
+     * entry, so present that one as Apple_HFS. */
+    if (fallback >= 0)
+        mbr[446 + (unsigned int)fallback * 16 + 4] = 0xaf;
 }
 
 bool hfsplus_had_hfs_candidate(void)
@@ -149,6 +201,16 @@ int hfsplus_partitions(int drive, struct partinfo *parts, int capacity,
         if (i && mult != *multiplier)
             return HFS_RO_UNSUPPORTED; /* mixed units cannot be represented */
         *multiplier = mult;
+    }
+    if (scan_had_hfs) {
+        uint64_t largest = 0;
+        for (int i = 0; i < rc; ++i) {
+            if (found[i].length > largest) {
+                largest = found[i].length;
+                usb_hfs_offset = found[i].offset;
+                usb_hfs_unit = found[i].unit;
+            }
+        }
     }
     return rc;
 }

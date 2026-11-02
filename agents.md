@@ -211,6 +211,12 @@ Flags: `USED=1`, `DELETED=2`, `BASE=4`, `TOMBSTONE=8`.
 
 Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware/export/{fat.h,hfsplus_rb.h}`, `firmware/export/config/ipod6g.h`, `bootloader/ipod-s5l87xx.c`.
 
+- USB mode unmounts the filesystem before exposing the raw disk. The HFS+
+  partition geometry is cached during the partition scan, and the USB read
+  filter relabels the data partition type to `Apple_HFS` in RAM
+  (`0x0B`/`0x0C` -> `0xAF`). The native MBR is never written. Without the
+  cached geometry, macOS sees a stale FAT32 type and refuses to probe HFS+.
+
 ---
 
 ## 5. Limits
@@ -228,8 +234,8 @@ Integration points: `firmware/common/{disk,fat,file,file_internal}.c`, `firmware
 | Directory index | 16,384 parents; fallback scan |
 | CNID index | 4,096 entries; fallback scan |
 | Database workflow | Mac host build; on-device rebuild unsupported |
-| Hardware | V2.1.1 confirmed on one Classic 6G; V3.0/v3 cache and iFlash validation pending |
-| USB transfer | HFS+ firmware USB mass storage is read-only; Apple Disk Mode for writes |
+| Hardware | V2.1.1 confirmed on one Classic 6G; V3.1 Beta 5 read-only USB validated on the same iFlash device |
+| USB transfer | HFS+ firmware USB mass storage is read-only; Apple Disk Mode for writes. The USB view relabels the data partition as Apple_HFS in RAM. |
 
 ---
 
@@ -293,6 +299,8 @@ The bootloader must remain Thumb and fit `MOVE_AREA`.
 - Rockbox USB mass storage is read-only on HFS+ firmware builds. Host writes
   return SCSI DATA PROTECT; use Apple Disk Mode for changes. The read-only LUN
   is safe for copying files off and reading `/.rockpod-rw` for diagnostics.
+  The USB view relabels the HFS+ data partition as `Apple_HFS` in RAM; the
+  raw MBR may still say `0x0B`/`0x0C` and must not be repaired from the host.
 
 ---
 
@@ -376,6 +384,7 @@ Before changing code:
 While changing code:
 
 - Keep native HFS+ metadata immutable.
+- Keep the USB MBR relabel RAM-only; never write the native partition type.
 - Preserve persist-before-expose ordering.
 - Use checked arithmetic.
 - Return specific errors.

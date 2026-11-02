@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "config.h"
 #include "hfsplus_rb.h"
+#include "hfsplus_state.h"
 #include "storage.h"
 #include "mutex.h"
 #include <string.h>
@@ -59,6 +60,29 @@ int run_rb_test(const uint8_t *image, size_t length, uint32_t sector)
     CHECK(chosen >= 0);
     CHECK(hfsplus_mount(0, 0, parts[chosen].start, parts[chosen].size) == 0);
     CHECK(hfsplus_mounted(0));
+
+    /* The USB MBR view must relabel the mounted HFS+ partition without
+     * changing the on-disk MBR. */
+    uint8_t mbr[512];
+    memset(mbr, 0, sizeof(mbr));
+    uint32_t unit = (uint32_t)physical_sector * (uint32_t)multiplier;
+    uint64_t base = hfs_states[0].volume.base;
+    CHECK(unit && base && base % unit == 0);
+    uint32_t mbr_start = (uint32_t)(base / unit);
+    uint8_t *entry = mbr + 446;
+    entry[4] = 0x0c;
+    entry[8] = mbr_start & 0xff;
+    entry[9] = (mbr_start >> 8) & 0xff;
+    entry[10] = (mbr_start >> 16) & 0xff;
+    entry[11] = (mbr_start >> 24) & 0xff;
+    entry[12] = 0x10;
+    hfsplus_usb_fix_mbr(mbr, unit);
+    CHECK(entry[4] == 0xaf);
+
+    entry[4] = 0x0c;
+    entry[8] ^= 1;
+    hfsplus_usb_fix_mbr(mbr, unit);
+    CHECK(entry[4] == 0x0c);
     struct fat_file root, dir, file;
     struct fat_filestr stream;
     struct fat_dirscan_info scan;
@@ -108,5 +132,12 @@ int run_rb_test(const uint8_t *image, size_t length, uint32_t sector)
     CHECK(!writes && !out_of_bounds);
     hfsplus_unmount(0);
     CHECK(!hfsplus_mounted(0));
+
+    /* USB mode unmounts the volume before exporting the raw disk; the MBR
+     * relabel must still work from the cached partition geometry. */
+    entry[4] = 0x0c;
+    entry[8] = mbr_start & 0xff;
+    hfsplus_usb_fix_mbr(mbr, unit);
+    CHECK(entry[4] == 0xaf);
     return 0;
 }

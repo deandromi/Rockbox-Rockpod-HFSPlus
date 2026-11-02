@@ -270,7 +270,7 @@ int hfs_partition_scan(hfs_ro_read_fn read, void *ctx, uint64_t size,
                 if (rc)
                     found = 1;
                 int next = add(parts, cap, count, size, sector, begin, blocks,
-                               units[u], p[4]);
+                               units[u], rc == 0xaf ? 0xaf : p[4]);
                 if (next < 0) {
                     if (next == HFS_RO_BUFFER)
                         return next;
