@@ -30,7 +30,7 @@ V3.0 decomposes the adapter, introduces the required v3 overlay format with a re
 
 **Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2-final)
 is the final V2.1.1 package. It keeps an existing v1/v2 overlay and does not
-require the V3.0 new-overlay step.
+require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then you will not receive future overlay, bootloader and firmware updates. **!Switching between V2 and post V2 versions causes data loss due to the overlay being rewritten, the following data will get lost: Files/directories created by Rockpod, Playlists, Settings, Coverflow-cache, Directory changes, Scrobble data and Timestamps.
 
 ## Compatibility and limits
 
@@ -47,12 +47,12 @@ require the V3.0 new-overlay step.
 
 ## Installation
 
-> **V3.0 requires a v3 overlay. This is not optional.**
+> **V3.0 and up requires a v3 overlay. This is not optional.**
 >
 > A new installation must create a fresh `.rockpod-rw`; V3.0 initializes it
 > as v3. Existing v1/v2 overlays are **not migrated** and are not a supported
 > V3.0 configuration. Back one up only as recovery material, then replace it.
-> If you already created a v3 overlay during the V3.0 beta, you may keep it —
+> If you already created a v3 overlay when installing V3.0, keep it —
 > confirm **Debug → Disk Info → Overlay format: v3**.
 
 Download the release assets, or build them from source. Back up the iPod and `.rockpod-rw` first.
