@@ -5,6 +5,21 @@ Public version string: `3.2.0-beta-v13.0`
 Status: **experimental beta**. Not a stable release.
 Stable release remains **V3.0 // Version V13.0**.
 
+## Update type
+
+**Both firmware and bootloader.** This release contains:
+
+- **Firmware:** `rockbox.ipod` and `rockbox.zip` (the zip contains
+  `.rockbox/rockbox.ipod`, codecs, plugins, themes, fonts and languages).
+- **Bootloader:** `bootloader-ipod6g.ipod` and the DFU installer
+  `bootloader-ipod6g.dfu`.
+
+Installing the firmware alone gives you the V3.2 firmware features but not the
+bootloader minimal-state/Thumb changes. Installing the bootloader alone does
+not update the firmware. A full V3.2 install means the firmware assets **and**
+the bootloader assets, in that order (bootloader first if you are recovering a
+device, then firmware).
+
 ## Read this first
 
 This beta is a large, experimental efficiency batch. It is **not**

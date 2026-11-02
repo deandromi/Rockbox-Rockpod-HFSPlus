@@ -90,6 +90,9 @@ Companion document: `agents.md` (architecture, invariants, code-quality review).
 - Official non-beta releases always carry a codename in the release title and
   notes. Beta/pre-release builds keep `Vx.y Beta N`; the final codename is not
   used for a beta unless the owner explicitly names it.
+- Every release must state its **update type** in the release notes:
+  `firmware only`, `bootloader only`, or `both firmware and bootloader`, with
+  the assets grouped accordingly. This is a required field, not a footnote.
 - `docs/VERSION` on the current beta line: `3.2.0-beta-v13.0`.
 - Do not tag or publish a release until the owner has reviewed the package,
   except for a beta the owner explicitly names and approves. **V3.2 Beta
@@ -994,6 +997,7 @@ Do not mark a row “pass” from a different build or a different device.
 - [ ] Embedded `.rockbox/rockbox.ipod` SHA-256 matches the release `rockbox.ipod`.
 - [ ] Bootloader is scrambled and accepted by `mks5lboot`.
 - [ ] Release notes state the exact firmware version, codename, bootloader requirement and overlay format compatibility.
+- [ ] Release notes state **update type** (`firmware only`, `bootloader only`, or `both`) and group the assets by type.
 - [ ] Owner approval recorded before tagging or publishing.
 
 ### 17.4 Device

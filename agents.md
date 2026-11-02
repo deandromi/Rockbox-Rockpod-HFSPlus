@@ -28,6 +28,9 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 
 - Official non-beta releases use a semantic version line plus a human codename
   in the public release title and notes.
+- Every release note must state the **update type**: `firmware only`,
+  `bootloader only`, or `both firmware and bootloader`, and list which assets
+  belong to each. Do not make users infer this from filenames.
 - Beta/pre-release builds use `Vx.y Beta N`; the codename is reserved for the
   final release unless the owner explicitly names a beta.
 - Current stable: **V3.0 // Version V13.0**.
