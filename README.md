@@ -30,7 +30,7 @@ V3.0 decomposes the adapter, introduces the required v3 overlay format with a re
 
 **Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2-final)
 is the final V2.1.1 package. It keeps an existing v1/v2 overlay and does not
-require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then you will not receive future overlay, bootloader and firmware updates. **!Switching between V2 and post V2 versions causes data loss due to the overlay being rewritten, the following data will get lost: Files/directories created by Rockpod, Playlists, Settings, Coverflow-cache, Directory changes, Scrobble data and Timestamps.
+require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then you will not receive future overlay, bootloader and firmware updates. **!Switching between V2 and post V2 versions causes data loss due to the overlay being rewritten, the following data will get lost: Files/directories created by Rockpod, Playlists, Settings, Coverflow-cache, Directory changes, Scrobble data and Timestamps.**
 
 ## Compatibility and limits
 
