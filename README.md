@@ -16,6 +16,10 @@ Built for the iPod Classic 6G. Compatibility depends on the Classic revision, st
 
 FAT32 can be unreliable on some iPods. HFSPlus Rockboxed iPod keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume. HFSPlus Rockboxed iPod also exists for huge efficiency upgrades, actual stable firmware and bootloaders, anti-corruption protection and more! If any of these functionalities pose great advantages on your installation, consider starring this repository, it's much appreciated (:
 
+## About Helikon-OS
+
+Helikon-OS is a totally new bootloader/firmware from the ground up. It is currently in development and it will take a long while before I'll release V1.0. Helikon-OS will pose major advantages with slimmed down code, extra promised stability, a desktop application, album info, (custom) native games and way more. Check the repository on my profile and consider giving it a star, it's much appreciated! 
+
 ## Important!
 
 Please make a decision between picking either: the newer post V2 releases or the V2-Final release. This is important because the writeable overlay used in HFSPlus Rockboxed iPod is not backwards compatible as of V3. V3 itself poses some strong advantages including power efficiency, better corruption protection and soon the ability to build coverflow-cache and music-database building on the iPod itself instead of on a Mac. V2 is however currently widely tested and is verified to work on most iPods, but if a bug in V2 is found, no matter how important, it will not get fixed. V3.2 Thermo-Nuclear is the recommended option as of November 2nd 2026. Also keep in mind that if you haven't yet formatted your iPod to HFS+ that it will lose all its data anyway, make sure to make backups and transfer existing music and playlists to a different device. V3.2 currently shows improved battery life as well, even by a mile compared to the original Rockbox firmware and bootloader, my own iPod lasted almost 2 hours longer on the same battery from 100% to 0%.
