@@ -23,7 +23,7 @@ issue #77.
 Install steps are in `README.md` §2. The short version, in Apple Disk Mode:
 
 ```sh
-backup="$HOME/rockpod-overlay-backup-$(date +%Y%m%d-%H%M%S)"
+backup="$HOME/hfsplus-rockboxed-ipod-overlay-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$backup"
 if [ -e "/Volumes/IPOD/.rockpod-rw" ]; then
     ditto "/Volumes/IPOD/.rockpod-rw" "$backup/.rockpod-rw"
