@@ -32,19 +32,19 @@ kill "$(cat .xerj-data/server.pid)"
 ## Search
 
 ```sh
-~/.local/bin/xerj search --prefix rockpod \
+~/.local/bin/xerj search --prefix hfsplus-rockboxed-ipod \
   "where is overlay stage 11 validated and what does it check?"
 ```
 
 The CLI search is lexical. Use `--json` for raw results. For exact definitions:
 
 ```sh
-~/.local/bin/xerj def --prefix rockpod overlay_validate
+~/.local/bin/xerj def --prefix hfsplus-rockboxed-ipod overlay_validate
 ```
 
 ## Semantic project memory
 
-The durable memory namespace is `rockpod-project`:
+The durable memory namespace is `hfsplus-rockboxed-ipod-project`:
 
 ```sh
 tools/xerj/remember.sh \

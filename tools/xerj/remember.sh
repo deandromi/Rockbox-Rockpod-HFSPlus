@@ -16,7 +16,7 @@ body = json.dumps({
     "metadata": {"kind": sys.argv[2]},
 }).encode("utf-8")
 request = urllib.request.Request(
-    "http://127.0.0.1:9200/_memory/rockpod-project",
+    "http://127.0.0.1:9200/_memory/hfsplus-rockboxed-ipod-project",
     data=body,
     headers={"content-type": "application/json"},
     method="POST",
