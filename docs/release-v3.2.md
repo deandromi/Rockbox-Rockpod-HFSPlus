@@ -49,7 +49,8 @@ below, so please keep a backup even though this is no longer a beta.
 ## Battery life
 
 Owner-reported result on the affected iPod Classic 6G with iFlash SD: almost
-**two hours longer runtime** with V3.2 than before.
+**two hours longer runtime** with V3.2 than before, on the same battery from
+100% to 0%.
 
 V3.0 did most of the architectural efficiency work — the v3 overlay, persistent
 index cache, high-water entry reads and reduced validation. V3.2 fixes the
