@@ -6,6 +6,8 @@
 
 **Previous stable: V3.0 // Version V13.0. Legacy: V2.0-Final.**
 
+**Current releases are based on rockpod (based on rockbox). There's a chance I will build a new bootloader/firmware from the ground up**
+
 HFSPlus Rockboxed iPod is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
 Built for the iPod Classic 6G. Compatibility depends on the Classic revision, storage adapter and HFS+ layout; test on your own device before relying on it.
