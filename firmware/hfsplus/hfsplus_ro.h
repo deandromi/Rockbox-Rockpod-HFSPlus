@@ -97,7 +97,7 @@ struct hfs_ro_volume {
     uint16_t node_size;
     uint8_t *scratch;
     size_t scratch_size;
-    /* Optional dedicated catalog node cache. Rockpod supplies this so a
+    /* Optional dedicated catalog node cache. HFSPlus Rockboxed iPod supplies this so a
      * directory walk does not reread the same B-tree node for every entry. */
     uint8_t *catalog_cache;
     size_t catalog_cache_size;

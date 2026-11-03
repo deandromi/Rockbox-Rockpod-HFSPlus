@@ -347,7 +347,7 @@ int hfsplus_remove(struct fat_file *file, enum fat_remove_op what)
             file->hfs_removed = 1;
         }
         /* Base HFS+ data remains allocated and becomes unreachable only from
-         * Rockpod's merged namespace; native metadata is never modified. */
+         * HFSPlus Rockboxed iPod merged namespace; native metadata is never modified. */
     }
 out:
     hfs_diag_end(s);

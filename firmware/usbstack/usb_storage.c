@@ -40,7 +40,7 @@
 #include "core_alloc.h"
 #include "panic.h"
 
-/* HFS+ builds keep Rockpod writes inside the overlay.  Raw USB mass storage
+/* HFS+ builds keep HFSPlus Rockboxed iPod writes inside the overlay.  Raw USB mass storage
  * cannot merge host writes with that overlay safely, so expose the native
  * volume read-only and leave writes to Apple Disk Mode. */
 #if defined(HAVE_HFSPLUS_RO) && !defined(BOOTLOADER)

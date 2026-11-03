@@ -13,7 +13,7 @@
 
 /* v11 writable overlay.
  *
- * Native HFS+ metadata stays untouched.  Rockpod stores files that it creates,
+ * Native HFS+ metadata stays untouched.  HFSPlus Rockboxed iPod stores files that it creates,
  * grows, truncates, renames or removes inside a preallocated HFS+ container
  * named /.rockpod-rw.  The base HFS+ namespace and this overlay are merged by
  * the adapter.  This keeps Apple's catalog/allocation/journal structures valid

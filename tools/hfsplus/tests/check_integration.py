@@ -33,7 +33,7 @@ if sys.platform == "darwin":
     # freestanding firmware headers cannot be compiled against Mach-O.  Run a
     # native host build of the real adapter instead.  Linux/GCC keeps the
     # stricter freestanding syntax check below.
-    with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="hfsplus-rockboxed-ipod-host-") as tmp:
         build = Path(tmp)
         adapter = build / "adapter_host"
         run(cc + ["-std=gnu99", "-O1", "-g", "-Wall", "-Wextra",
@@ -61,7 +61,7 @@ if sys.platform == "darwin":
     print("Host checks passed; no ARM link, emulator, or iPod boot was tested.")
     raise SystemExit(0)
 
-with tempfile.TemporaryDirectory(prefix="rockpod-hfs-host-") as tmp:
+with tempfile.TemporaryDirectory(prefix="hfsplus-rockboxed-ipod-host-") as tmp:
     build = Path(tmp)
     shutil.copyfile(tests / "host-autoconf.h", build / "autoconf.h")
     include_dirs = [build, "firmware/target/arm/s5l8702/ipod6g",
