@@ -40,10 +40,16 @@ recovery environment, UI and host tools. This paper uses “the new firmware” 
 - [23. Phased roadmap](#23-phased-roadmap)
 - [24. Validation strategy](#24-validation-strategy)
 - [25. Open design decisions](#25-open-design-decisions)
+- [26. A non-coder's build path](#26-a-non-coders-build-path)
+- [27. Assembly order and handoff checklist](#27-assembly-order-and-handoff-checklist)
 - [Appendix A — Custom file ledger](#appendix-a--custom-file-ledger)
 - [Appendix B — Inherited hotspot ledger](#appendix-b--inherited-hotspot-ledger)
 - [Appendix C — Verdict summary](#appendix-c--verdict-summary)
 - [Appendix D — Chosen name: Helikon-OS](#appendix-d--chosen-name-helikon-os)
+- [Appendix E — Plain-language component catalogue](#appendix-e--plain-language-component-catalogue)
+- [Appendix F — Glossary](#appendix-f--glossary)
+- [Appendix G — FAQ](#appendix-g--faq)
+- [Appendix H — Build worksheet](#appendix-h--build-worksheet)
 
 ---
 
@@ -990,6 +996,216 @@ Release gate:
 
 ---
 
+## 26. A non-coder's build path
+
+This section is written for someone who wants to build, test and own
+Helikon-OS without being a C programmer. It is honest about the boundary.
+
+**You cannot compile Helikon-OS today, because Helikon-OS does not exist yet.**
+There is no source tree, no bootloader image and no installer. What exists is
+the donor tree described in this paper. A non-coder can still do four valuable
+things:
+
+1. build and test the donor firmware, so the toolchain and hardware are proven;
+2. prepare and verify backups, recovery media and a test device;
+3. run the acceptance tests that determine whether a developer's build is safe;
+4. manage the assembly plan and refuse a release that skips a gate.
+
+Writing the new kernel, VFS, overlay engine, database or UI is developer work.
+With an AI coding agent or a developer, a motivated non-coder can follow this
+plan, but should not pretend that copying files is the same as building a
+system.
+
+### 26.1 The two tracks
+
+| Track | Who does it | What it proves |
+|---|---|---|
+| **Donor track** | You, following commands | The Mac, toolchain, device, bootloader and test harness work. |
+| **Helikon-OS track** | Developer/AI, reviewed by you | The new modules exist and pass acceptance tests. |
+
+Never mix the two on the same device without a backup and a recovery plan.
+
+### 26.2 What you need
+
+- A Mac with Xcode Command Line Tools and Homebrew.
+- The Rockbox ARM toolchain (`arm-elf-eabi-gcc` 9.5.0 or the version the
+  project pins).
+- Python 3, `make`, `git`, `gh` and a text editor.
+- A **test iPod Classic 6G** that you can afford to recover, not your only
+  device.
+- A known-good Apple firmware/DFU recovery path.
+- A verified backup of the music library and `/.rockpod-rw`.
+- An iFlash SD/CF, SSD or original HDD, recorded by model.
+- Patience. This is a months-scale project, not an afternoon install.
+
+### 26.3 Stage 0 — build the donor, touch nothing
+
+Goal: prove the toolchain and the host tests.
+
+```sh
+git clone https://github.com/deandromi/hfsplus-rockboxed-ipod.git
+cd hfsplus-rockboxed-ipod
+make -C tools/hfsplus test
+make -C tools/hfsplus sanitize
+python3 tools/hfsplus/tests/check_integration.py
+```
+
+Then build the firmware and bootloader in separate directories, following the
+donor `shipping.md`. Do not install anything yet. The proof is that the host
+tests pass and the images link, not that a device boots.
+
+**You can verify:** test counts, sanitizer output, file sizes, map-file
+`MOVE_AREA` headroom.
+
+**A developer must verify:** that the image is the intended commit, that the
+bootloader is Thumb, and that no local changes are present.
+
+### 26.4 Stage 1 — recovery and inventory
+
+Goal: make the test device recoverable before any new image is installed.
+
+Checklist:
+
+- record the exact iPod model, revision, capacity and storage adapter;
+- record the battery condition and whether the device is chargeable;
+- confirm Apple Disk Mode and DFU entry;
+- confirm the Apple firmware can be restored if needed;
+- back up the music library, `.rockbox`, `/.rockpod-rw` and database files;
+- hash the backup and read one file back;
+- write down the current firmware and bootloader versions.
+
+**Stop if:** the device is the only copy of the music, the overlay is damaged, or
+you cannot enter Disk Mode/DFU reliably.
+
+### 26.5 Stage 2 — read-only Helikon-OS prototype
+
+Goal: boot a firmware that can read the native HFS+ library, play audio and
+show a UI, with **no writes at all**.
+
+What to copy from the donor:
+
+- S5L8702 HAL and target drivers;
+- HFS+ partition scanner and reader;
+- selected codecs;
+- a minimal UI and input layer;
+- read-only USB if needed for logs.
+
+What must be new or disabled:
+
+- no overlay;
+- no settings writes;
+- no database writes;
+- no native writes;
+- no plugins.
+
+**Acceptance:** the device boots, lists the library, plays a track, reboots, and
+the native volume is unchanged by a before/after hash of the whole disk outside
+the bootloader/firmware files.
+
+### 26.6 Stage 3 — transactional overlay v4
+
+Goal: add writes without risking native HFS+.
+
+What to copy:
+
+- the v3 format and validator as a **reference**;
+- the stage/reason diagnostic vocabulary;
+- the idea of a fixed-size container and a persisted index.
+
+What must be new:
+
+- v4 superblock, records, commit, replay and compaction;
+- host converter from v3;
+- power-loss test harness.
+
+**Acceptance:** create, append, close, rename, delete and settings-save survive
+a simulated power cut at every write boundary. The volume mounts read-only on
+any inconsistency. The native region hash is unchanged.
+
+### 26.7 Stage 4 — database, player and UI
+
+Goal: a usable music player without the legacy app layer.
+
+What to copy:
+
+- codecs and DSP;
+- album-art and metadata concepts;
+- one font and one icon set.
+
+What must be new:
+
+- immutable database schema and host builder;
+- playlist format;
+- playback state machine;
+- retained UI and theme format.
+
+**Acceptance:** 10,000-track library browses, searches and plays. Boot time,
+memory and battery are measured, not guessed.
+
+### 26.8 Stage 5 — USB, updates and migration
+
+Goal: read-only USB, verified firmware updates, and a one-way migration from
+the donor overlay.
+
+What to copy:
+
+- read-only LUN and RAM-only MBR relabel;
+- DFU/NOR knowledge;
+- host converter concepts.
+
+What must be new:
+
+- signed manifest and update flow;
+- v3→v4 converter with verify-before-switch;
+- recovery menu and logs.
+
+**Acceptance:** macOS mounts the volume read-only. A corrupted firmware image is
+rejected. A migrated library survives a reboot and a rollback.
+
+### 26.9 Stage 6 — hardening and power
+
+Goal: prove the system on more than one adapter and more than one revision.
+
+- 100-cycle sleep/wake and resume matrix;
+- power-loss matrix;
+- native HFS+ `diskutil verifyVolume` and metadata comparison;
+- audio quality and click-wheel tests;
+- thermal and charging checks.
+
+No stable release before this stage.
+
+### 26.10 What a non-coder should refuse
+
+- A build with no recorded test run.
+- A bootloader install with `--single`.
+- A “fix” that formats, erases, restores or deletes the overlay.
+- A firmware that writes native HFS+ metadata.
+- A release that hides unexecuted stress gates.
+- A plugin or theme bundle from an untrusted source.
+
+## 27. Assembly order and handoff checklist
+
+This is the order in which the modules should be brought up. Each step has a
+proof that does not require reading the code.
+
+| Order | Module | Source | Proof before moving on |
+|---:|---|---|---|
+| 1 | Toolchain and donor build | donor | Host tests, sanitizer, firmware link, bootloader link. |
+| 2 | Recovery and backup | owner | Disk Mode, DFU, verified backup, recovery plan. |
+| 3 | Bootloader native HFS+ read-only | donor bootloader + HFS+ reader | Loads a known image, Apple path intact, no overlay code. |
+| 4 | HAL and block layer | donor target | Storage read/write/flush on the test device. |
+| 5 | HFS+ read-only namespace | donor reader | Library lists, names resolve, unsupported files report a reason. |
+| 6 | Minimal player and UI | new + codecs | Playback, seek, next/previous, volume, screen sleep. |
+| 7 | Overlay v4 | new | Create/write/rename/delete/settings survive power cuts. |
+| 8 | Database and browsing | new | 10k tracks, search, album art, playlists. |
+| 9 | USB read-only and logs | donor concepts | macOS mounts read-only, logs export, no host writes. |
+| 10 | Update and migration | new | Signed image, rollback, v3→v4 conversion. |
+| 11 | Hardening | all | Adapter matrix, power-loss matrix, 100-cycle resume. |
+
+**Handoff package for each step:** interface document, test fixture, expected
+error codes, known limitations, and a rollback method. A module without a
+rollback method is not ready.
+
 ## Appendix A — Custom file ledger
 
 Line counts are from the audit tree; they will drift.
@@ -1258,6 +1474,289 @@ identity. Those remain upstream/technical lineage terms where attribution
 requires them, not the name of the new system.
 
 ---
+
+## Appendix E — Plain-language component catalogue
+
+This appendix is the “what do I actually do with this file?” list. It is
+organized by action rather than by directory, so a non-coder can follow it.
+
+**Legend**
+
+| Tag | Meaning |
+|---|---|
+| **Copy** | Take the code or data as-is. It encodes hardware or format knowledge that is expensive to rediscover. |
+| **Copy then adapt** | Keep the logic, but change the interface, policy or storage model. |
+| **Reference** | Do not copy the code. Use it to understand the behaviour or format, then write a new implementation. |
+| **Remove** | Do not put it in Helikon-OS. It is unsafe, obsolete or product-wrong. |
+
+### E.1 Green list — copy exactly
+
+| Component | What it does in plain English | Current files | Why copy | If omitted |
+|---|---|---|---|---|
+| S5L8702 clock and PLL setup | Wakes the CPU and sets its operating frequencies. | shared `s5l8702/` clocking | Wrong values can hang or damage the device. | Device may not boot reliably. |
+| GPIO, I2C and SPI | Talks to the PMU, codec, LCD and other chips. | shared `s5l8702/` | Board-specific pin and bus knowledge. | No display, audio, charging or buttons. |
+| ATA transport | Reads and writes disk sectors. | `storage_ata-6g.c` | LBA48, timing, DMA and CE-ATA details. | No filesystem. |
+| PMU and charger | Controls voltages, charging, backlight and power events. | `pmu-6g.c`, `power-6g.c` | Wrong sequencing can brown out or damage the device. | No safe charging or power-off. |
+| LCD panel init | Brings up the 320×240 display. | `lcd-6g.c` | Panel timings and controller setup. | No visible UI. |
+| Click wheel and buttons | Reads the wheel, buttons and hold switch. | `button-target.h`, target input code | Hardware timing and key map. | No input. |
+| Audio codec and I2S | Produces sound through the CS42L55. | `audio-6g.c`, `cscodec-6g.c` | Codec register and clocking knowledge. | No audio. |
+| ADC, RTC and piezo | Battery/accessory sensing, clock and clicker. | `adc-6g.c`, `rtc-6g.c`, `piezo-6g.c` | Board calibration and register details. | Wrong battery data, no clock/click. |
+| Serial debug | Early boot logs over serial. | `serial-6g.c` | The only low-level debug path. | Blind bring-up. |
+| Bootloader hardware bring-up | Initialises the board before loading firmware. | `bootloader/ipod-s5l87xx.c` | The first code that runs. | No boot. |
+| DFU and NOR knowledge | Installs and recovers the bootloader. | `utils/mks5lboot/` | Bricking risk if reinvented. | No safe recovery. |
+| HFS+ partition scanner | Finds the HFS+ volume in APM/MBR/GPT/raw layouts. | `hfsplus_partition.c` | Handles real iPod partition tables. | Volume not found. |
+| HFS+ volume/header validation | Checks block size, bounds, journal and alternate header. | `hfsplus_ro.c` | Prevents mounting corrupt or dirty volumes. | Data-loss risk. |
+| Catalog B-tree parser | Translates catalog nodes into folders, files and names. | `hfsplus_ro.c` | HFS+ is not a simple directory format. | No names or lookup. |
+| Extent parser and overflow reader | Maps logical file blocks to disk blocks. | `hfsplus_ro.c` | Large/fragmented files need this. | Plugin data files disappear. |
+| Host HFS+ tests and fixtures | Proves the parser without a device. | `tools/hfsplus/tests/` | Fast, repeatable safety net. | Every change is a device gamble. |
+| Selected codecs and DSP | Decodes and processes audio. | `lib/rbcodec` | Years of codec work. | No playback. |
+| One font and icon set | Gives the UI a consistent look. | `fonts/`, `icons/` | Cheap, proven assets. | UI looks unfinished. |
+
+### E.2 Yellow list — copy then adapt
+
+| Component | What it does | Current files | What to change | Why not copy as-is |
+|---|---|---|---|---|
+| Bootloader main flow | Finds storage, mounts, loads firmware and jumps. | `ipod-s5l87xx.c` | Native-only, manifest/hash check, recovery menu, no overlay. | Current flow trusts an unsigned image and carries too much. |
+| HFS+ reader module split | One large parser file. | `hfsplus_ro.c` | Split volume, B-tree, catalog, extents, unicode, read. | 1,274 lines in one file is hard to fuzz and review. |
+| Namespace merge | Combines native and overlay names. | `hfsplus_namespace.c` | Separate lookup, iterate and mutate. Never skip unsupported entries. | Silent skipping caused “missing files”. |
+| Overlay v3 format | Defines the old container layout. | `hfsplus_overlay.h`, `hfsplus_overlay_format.c` | Keep for migration and diagnostics. | It should not be the live format. |
+| Overlay validator | Checks entries, ranges, parents and flags. | `hfsplus_overlay_validate.c` | Share fixtures with the host converter. | C and Python validators diverged before. |
+| Overlay diagnostics | Reports stage, error, slot and reason. | `hfsplus_diag.c` | Keep the vocabulary, add structured events. | Useful for support, but tied to old stages. |
+| FAT adapter | Maps FAT-style calls to HFS+. | `hfsplus_fat.c`, `hfsplus_fat.h` | Thin `fs_ops` adapter only. | It leaks filesystem policy into generic code. |
+| Settings | Stores user preferences. | `settings.c`, `settings_list.c` | New schema, two checksummed slots, atomic promotion. | Current storage is callback-heavy and deferred. |
+| Debug menu | Shows disk, overlay and system diagnostics. | `debug_menu.c` | Split into small panels and an event log. | 3,141 lines is too much for a diagnostic screen. |
+| USB LUN and MBR relabel | Presents a read-only HFS+ view to macOS. | USB storage code | Keep read-only, explicit descriptors, RAM-only relabel. | The relabel must never become a native write. |
+| Album-art cache | Avoids repeated folder-art probes. | `albumart.c` | One directory cache, explicit invalidation. | Negative caching can go stale. |
+| Build system | Configures and builds Rockbox. | `tools/configure`, Makefiles | Add reproducible builds, size budgets, signed manifests. | Current build is tied to the old product shape. |
+| Host tools | Build database, artwork and overlay exports. | `tools/rockpod/` | New schema and v4 converter. | Old tools write old formats. |
+| Documentation | Explains install, safety and validation. | `README`, `shipping.md`, docs | Rename, simplify, keep invariants. | Docs drift faster than code. |
+| ATA power and flush policy | Sleeps, wakes and flushes the disk. | `storage_ata-6g.c` | Explicit state machine, real flush errors. | Ad-hoc policy caused freezes and dead sleep. |
+| Backlight/PMU policy | Turns the screen on/off and caches PMU state. | `backlight.c`, `backlight-6g.c` | Invalidate state on every transition. | Stale cache can leave the screen dark. |
+
+### E.3 Orange list — use as reference, then reimplement
+
+| Component | Why not copy | What to build instead |
+|---|---|---|
+| VFS and file cache | FAT-shaped, global state, HFS+ special cases. | Clean block/VFS/handle API with capabilities. |
+| Overlay allocator/store/load | Bitmap/entry/data ordering is hard to reason about. | Transactional v4 log with commit records and compaction. |
+| Tagcache and tagtree | 8,700+ lines of cache, changelog, dircache and cursor logic. | Immutable host-built database and a small browser. |
+| Playback state machine | 4,363 lines tied to legacy buffering and events. | Smaller buffer/decoder/output state machine. |
+| Playlist storage | Legacy control-file machinery. | Versioned playlist file with atomic writes. |
+| Settings engine | Huge table and callback system. | New schema and two-slot config store. |
+| UI/GUI/WPS | 20k GUI lines plus 80k WPS assets. | Retained-mode screens and one theme format. |
+| Plugin API | Raw hardware and storage access. | No plugins in v1, capability API later. |
+| Database builder | Old schema and tagcache assumptions. | New schema, host-first, checksummed. |
+| Update flow | Unsigned image and fixed jump. | Manifest, hash, signature and rollback policy. |
+| Power policy | Unmeasured states and early-boot callbacks. | Explicit state machine with measured transitions. |
+| Theme/asset pipeline | 133 themes and a large skin language. | One default theme, selectable fonts/icons. |
+
+### E.4 Red list — remove from Helikon-OS
+
+| Current thing | Why it must go | What replaces it |
+|---|---|---|
+| Native HFS+ writes | Can corrupt the music library and Apple metadata. | Overlay-only writes; native volume read-only. |
+| Journal replay | Can change native state without a full journal implementation. | Dirty volume mounts read-only and reports a code. |
+| Overlay code in bootloader | Adds size, risk and a write path before the OS. | Native-only rescue bootloader. |
+| `--single` installation | Destroys the Apple NOR boot path. | Dual-boot installer only; recovery preserved. |
+| Writeable USB mass storage | Host writes bypass the overlay and safety model. | Read-only LUN; Apple Disk Mode for writes. |
+| Silent native fallback | Turns an overlay failure into native writes. | Fail closed; readable diagnostics. |
+| Zero-header reset | Destroys user state to “fix” an overlay. | Fresh init only for an all-zero container. |
+| Silent unsupported-file skipping | Makes real files look missing. | List the entry and return a specific error. |
+| Live v1/v2/v3 formats in the core | Three formats multiply bugs and tests. | One v4 format plus a host converter. |
+| Tagcache and dircache | Huge, legacy, redundant with a new database. | Immutable database and direct lookup. |
+| Full plugin tree | 946k lines, raw hardware, security and size risk. | First-party features; sandbox later. |
+| Raw plugin hardware API | A plugin can brick the device or corrupt storage. | Capability API only, or no plugins. |
+| Legacy WPS/themes | 80k lines of skin language and assets. | One new theme format. |
+| Unsigned firmware/plugins | No integrity or trust boundary. | Signed manifest and explicit trust. |
+| Periodic early-boot callbacks | Caused a 4–6 second freeze in the donor. | Explicit state machine and idle policy. |
+| Cached PMU/backlight state without invalidation | Can leave the device dark or dead after sleep. | Invalidate on every transition. |
+| Unmeasured overclock/undervolt/charging | Can damage hardware or battery. | Measured, documented policies only. |
+| APFS/HFSX/FAT32-primary design | Outside the product’s filesystem contract. | HFS+ native, FAT read-only fallback if needed. |
+| Full Rockbox application layer | Inherits 20 years of unrelated features. | Product-specific player/UI. |
+| On-device full database rebuild in v1 | Slow, risky and unnecessary for first boot. | Host-built database; on-device later. |
+| Unbounded dynamic caches | 64 MiB RAM cannot absorb them. | Fixed budgets and eviction policies. |
+
+### E.5 Copy order if you are assembling the donor knowledge
+
+1. Host tests and fixtures.
+2. S5L8702 clock/GPIO/I2C/SPI.
+3. PMU, power, LCD, buttons, audio, ADC/RTC.
+4. ATA transport.
+5. Partition scanner.
+6. HFS+ volume/header validation.
+7. Catalog B-tree and extents.
+8. Bootloader hardware bring-up and DFU.
+9. Selected codecs/DSP.
+10. Read-only USB and diagnostics.
+11. Overlay v3 format/validator as migration reference.
+12. Fonts/icons and documentation.
+
+This is a knowledge-copy order, not a build order. Build order is in §27.
+
+## Appendix F — Glossary
+
+| Term | Plain-language meaning |
+|---|---|
+| **Bootloader** | The small program that runs first, finds the firmware and starts it. |
+| **Firmware** | The operating system and drivers that run the player. |
+| **HAL** | Hardware abstraction layer. A clean interface over registers and chips. |
+| **Block device** | A device that reads and writes fixed-size sectors or blocks. |
+| **VFS** | Virtual filesystem. The common file interface used by applications. |
+| **HFS+** | Apple’s hierarchical file system used by the iPod. |
+| **Catalog** | The HFS+ database of files, folders and names. |
+| **Allocation bitmap** | The map of which disk blocks are in use. |
+| **Extent** | A contiguous run of disk blocks belonging to a file. |
+| **Extents overflow** | Extra extent records for files with more than eight inline runs. |
+| **Journal** | A log of pending metadata changes. Helikon-OS never replays it. |
+| **Native metadata** | Apple’s catalog, bitmap, extents tree, volume header and journal. |
+| **Overlay** | A separate container that holds writes without touching native HFS+. |
+| **Container** | The preallocated HFS+ file that holds the overlay. |
+| **Superblock** | The header that describes an overlay’s layout and generation. |
+| **Commit record** | The record that makes a transaction visible atomically. |
+| **Checksum** | A value used to detect corruption. |
+| **Compaction** | Copying live overlay records into a fresh area to reclaim space. |
+| **DFU** | Device Firmware Upgrade. The USB recovery/install mode. |
+| **NOR** | The flash chip that holds the early bootloader/Apple boot path. |
+| **MOVE_AREA** | The memory window the bootloader must fit into. |
+| **Cross-compiler** | A compiler that runs on the Mac but produces ARM code. |
+| **Toolchain** | Compiler, linker, assembler and related build tools. |
+| **Host test** | A test that runs on the Mac, not the iPod. |
+| **Sanitizer** | A compiler mode that catches memory and undefined-behaviour bugs. |
+| **Fuzzing** | Feeding random/malformed input to find crashes. |
+| **Manifest** | A small file describing a firmware image, version, size and hashes. |
+| **Signature** | A cryptographic proof that an image came from a trusted builder. |
+| **LUN** | A USB mass-storage logical unit. Helikon-OS exposes it read-only. |
+| **Dircache** | A legacy Rockbox directory cache. Helikon-OS does not use it. |
+| **Tagcache** | A legacy Rockbox metadata database. Helikon-OS replaces it. |
+| **BSS** | Zero-initialised global memory in a firmware image. |
+| **DRAM** | The iPod’s 64 MiB main memory. |
+
+## Appendix G — FAQ
+
+**Can I build Helikon-OS today?**<br>
+No. Helikon-OS is a design, not a source tree. You can build and test the donor
+project today and follow the assembly plan.
+
+**Do I need to be a programmer?**<br>
+To write the new kernel, VFS, overlay or UI, yes, or you need an AI/developer.
+A non-coder can manage the build, backups, device tests, acceptance gates and
+release checklist.
+
+**Will it run on my iPod?**<br>
+The first target is the iPod Classic 6G. Other S5L8702 iPods are future work.
+
+**Will it erase my music?**<br>
+The design forbids native HFS+ writes. But every experimental build still needs
+a verified backup. Do not test on an only-copy library.
+
+**Can I keep HFS+?**<br>
+Yes. That is the point. Native HFS+ stays read-only and the overlay holds writes.
+
+**Can I still boot Apple firmware?**<br>
+Yes, if the Apple NOR path is preserved. Never use `--single`.
+
+**Will my Rockbox plugins work?**<br>
+Not in v1. The plugin API is deliberately absent until a capability sandbox
+exists. PictureFlow, album art and database browsing become first-party
+features.
+
+**Why not FAT32?**<br>
+FAT32 conversion is inconvenient and loses the Mac-native HFS+ library. Helikon-OS
+is for people who want to stay on HFS+.
+
+**What happens if the overlay is corrupt?**<br>
+The volume mounts read-only. It does not fall back to native writes and does not
+auto-format.
+
+**Can I migrate my old overlay?**<br>
+Yes, through a host converter with verify-before-switch and rollback. Not by
+letting the firmware “repair” it.
+
+**How long will this take?**<br>
+Months, not an afternoon. The donor build is a day. The first read-only player
+is a larger project. The transactional overlay and device matrix are the long
+poles.
+
+**What can I test without coding?**<br>
+Toolchain builds, host tests, backups, Disk Mode/DFU, boot, playback, sleep,
+USB read-only, migration rehearsals and the device matrix.
+
+**What should I never do?**<br>
+Never format, erase, restore or delete the overlay to fix a software error.
+Never use `--single`. Never claim a gate passed without a recorded run.
+
+**Is Helikon-OS an official Rockbox or Rockpod project?**<br>
+No. It is an independent system. Rockbox and Rockpod are upstream lineage and
+must be credited, but the product identity is Helikon-OS.
+
+**How can I help?**<br>
+Test on different 6G revisions and storage adapters. Record boot, sleep, plugin,
+audio and USB results. Report exact firmware/build hashes and logs.
+
+## Appendix H — Build worksheet
+
+Copy this into a notes file and fill it in before touching a device.
+
+### H.1 Device inventory
+
+| Field | Value |
+|---|---|
+| iPod model/revision | |
+| Capacity | |
+| Storage adapter | |
+| Card/SSD model | |
+| Battery condition | |
+| macOS version | |
+| Current firmware | |
+| Current bootloader | |
+| Overlay format | |
+| Disk Mode confirmed | |
+| DFU confirmed | |
+| Apple restore path confirmed | |
+
+### H.2 Backup evidence
+
+| Item | Path | Size | SHA-256 | Read back? |
+|---|---|---|---|---|
+| Music library | | | | |
+| `.rockbox` | | | | |
+| `/.rockpod-rw` | | | | |
+| Database files | | | | |
+| Current firmware | | | | |
+
+### H.3 Toolchain evidence
+
+| Tool | Version | Works? |
+|---|---|---|
+| `arm-elf-eabi-gcc` | | |
+| `make` | | |
+| Python 3 | | |
+| `git` | | |
+| `gh` | | |
+| Host tests | | |
+| Sanitizer | | |
+
+### H.4 Phase sign-off
+
+| Phase | Evidence | Pass? | Date |
+|---|---|---|---|
+| 0 Donor build | | | |
+| 1 Recovery/backup | | | |
+| 2 Read-only prototype | | | |
+| 3 Overlay v4 | | | |
+| 4 Database/player/UI | | | |
+| 5 USB/update/migration | | | |
+| 6 Hardening | | | |
+
+### H.5 Hard stops
+
+- [ ] This is not the only copy of the music.
+- [ ] The backup has been read back.
+- [ ] Disk Mode and DFU are confirmed.
+- [ ] The Apple restore path is confirmed.
+- [ ] The bootloader is not being installed with `--single`.
+- [ ] No step requires formatting or deleting the overlay.
+- [ ] Every claimed test has a recorded log.
 
 ## Closing
 
