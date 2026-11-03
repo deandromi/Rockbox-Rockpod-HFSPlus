@@ -478,6 +478,7 @@ Hard stops:
 | `docs/hardware-validation.md` | Hardware test roadmap |
 | `docs/efficiency.md` | Disk/CPU power audit and measurement checklist |
 | `docs/efficiency-paper.md` | Repository-wide efficiency paper (custom HFS+, inherited Rockbox, build/tooling, non-code) |
+| `docs/greenfield-firmware-paper.md` | Line-audited greenfield bootloader/firmware design study |
 | `docs/release-v3.0.md` | V3.0 release notes and hashes |
 | `docs/release-v3.1.md` | Draft V3.1 “Nuclear and Readable” release note (not released) |
 | `docs/release-v3.2-beta.md` | V3.2 Beta 1 release notes, warnings and hashes |
