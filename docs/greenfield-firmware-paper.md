@@ -1226,18 +1226,20 @@ domain and GitHub availability before adopting one.
 
 | Name | Why it fits | Possible family |
 |---|---|---|
-| **Cadence** | Music, timing, steady rhythm; a player/firmware identity. | Cadence firmware; Keel bootloader; Cairn recovery. |
-| **Keel** | The structural backbone of a ship; stability and boot foundation. | Keel bootloader. |
+| **Keel** | The structural backbone of a ship; stability and boot foundation. | Keel bootloader / project. |
+| **Basalt** | A solid, immutable base; the native volume as bedrock. | Basalt firmware core. |
 | **Cairn** | A trail marker; recovery, waypoints and safe return. | Cairn recovery mode. |
-| **Basalt** | A solid, immutable base; the native volume as bedrock. | Basalt core. |
-| **Aegis** | Protection and shielding; fail-closed data safety. | Aegis overlay. |
-| **Lumen** | Display, light and clarity; UI identity. | Lumen UI. |
-| **Aria** | A self-contained musical piece; player identity. | Aria player. |
-| **Polaris** | Navigation and guidance; boot/recovery. | Polaris boot. |
+| **Auralis** | A coined audio name; player and sound identity. | Auralis player. |
+| **Vellum** | A clean surface for the interface; UI/theme identity. | Vellum UI. |
+| **Rampart** | A defensive wall; overlay and fail-closed protection. | Rampart overlay. |
+| **Kestrel** | A precise, fast bird; responsiveness and reliability. | Kestrel performance profile. |
+| **Mooring** | A safe attachment point; storage and recovery. | Mooring storage layer. |
 
-**Recommended family:** **Cadence** for the firmware, **Keel** for the
-bootloader and **Cairn** for recovery. It reads as one product rather than a
-fork, and none of the names inherit the old filesystem or Rockbox identity.
+**Recommended family:** **Keel** as the project/boot foundation, **Basalt** as
+the firmware core, **Cairn** for recovery, **Auralis** for the player and
+**Vellum** for the UI. The names are independent of the old filesystem and
+Rockbox identity. Verify trademark, domain and GitHub availability before
+committing; avoid names already used by large technology or audio companies.
 
 ---
 
