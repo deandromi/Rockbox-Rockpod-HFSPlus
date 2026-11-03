@@ -1,4 +1,4 @@
-# A Greenfield Bootloader and Firmware for the iPod Classic 6G
+# Helikon-OS: A Greenfield Bootloader and Firmware for the iPod Classic 6G
 
 ### A line-audited design study of the HFSPlus Rockboxed iPod tree
 
@@ -7,6 +7,10 @@ Scope: every tracked subsystem in this repository, with custom modules audited a
 file and function level and inherited Rockbox subsystems audited at module level.  
 Purpose: decide what to keep, modify, rewrite or exclude if the project became a
 completely new bootloader and firmware rather than a continuation of this fork.
+
+Working name: **Helikon-OS**. It is used for the project, bootloader, firmware,
+recovery environment, UI and host tools. This paper uses “the new firmware” and
+“Helikon-OS” interchangeably.
 
 ## Contents
 
@@ -39,7 +43,7 @@ completely new bootloader and firmware rather than a continuation of this fork.
 - [Appendix A — Custom file ledger](#appendix-a--custom-file-ledger)
 - [Appendix B — Inherited hotspot ledger](#appendix-b--inherited-hotspot-ledger)
 - [Appendix C — Verdict summary](#appendix-c--verdict-summary)
-- [Appendix D — Name candidates](#appendix-d--name-candidates)
+- [Appendix D — Chosen name: Helikon-OS](#appendix-d--chosen-name-helikon-os)
 
 ---
 
@@ -982,7 +986,7 @@ Release gate:
 7. **FAT fallback:** read-only recovery only, or full read/write fallback.
 8. **Theme format:** minimal declarative format vs retained-mode layouts.
 9. **Update transport:** USB read-only + macOS staging vs DFU-only.
-10. **Product name and identity** (see Appendix D).
+10. **Product identity:** Helikon-OS is chosen; see Appendix D for the naming rule and clearance checklist.
 
 ---
 
@@ -1219,27 +1223,39 @@ overlay formats, tagcache/dircache, full plugin tree, raw plugin hardware API,
 legacy WPS/themes, unsigned updates, periodic early-boot power callbacks,
 unmeasured power/charging changes, full Rockbox application copy.
 
-## Appendix D — Name candidates
+## Appendix D — Chosen name: Helikon-OS
 
-These names do not contain “Rockpod”, “Rockbox” or “HFS+”. Verify trademark,
-domain and GitHub availability before adopting one.
+**Decision: Helikon-OS. Use it for everything.**
 
-| Name | Why it fits | Possible family |
-|---|---|---|
-| **Keel** | The structural backbone of a ship; stability and boot foundation. | Keel bootloader / project. |
-| **Basalt** | A solid, immutable base; the native volume as bedrock. | Basalt firmware core. |
-| **Cairn** | A trail marker; recovery, waypoints and safe return. | Cairn recovery mode. |
-| **Auralis** | A coined audio name; player and sound identity. | Auralis player. |
-| **Vellum** | A clean surface for the interface; UI/theme identity. | Vellum UI. |
-| **Rampart** | A defensive wall; overlay and fail-closed protection. | Rampart overlay. |
-| **Kestrel** | A precise, fast bird; responsiveness and reliability. | Kestrel performance profile. |
-| **Mooring** | A safe attachment point; storage and recovery. | Mooring storage layer. |
+Helikon is the Greek *Ἑλικών*: Mount Helicon, the mountain of the Muses and the
+Hippocrene spring, the classical source of poetic and musical inspiration.
+“Helicon” is also a brass instrument, so the name is musical twice over. “OS”
+makes the system identity explicit and leaves no ambiguity about what the
+project is.
 
-**Recommended family:** **Keel** as the project/boot foundation, **Basalt** as
-the firmware core, **Cairn** for recovery, **Auralis** for the player and
-**Vellum** for the UI. The names are independent of the old filesystem and
-Rockbox identity. Verify trademark, domain and GitHub availability before
-committing; avoid names already used by large technology or audio companies.
+The name is used consistently for:
+
+- the project and repository identity;
+- the bootloader and recovery environment;
+- the firmware and player;
+- the UI, theme and documentation;
+- host tools, manifests, package names and release titles.
+
+No separate component codenames are needed. “Helikon-OS” is the product; a
+component is described as “the Helikon-OS bootloader”, “the Helikon-OS overlay”
+or “the Helikon-OS host tools.”
+
+Before public use, verify:
+
+- trademark and domain availability;
+- GitHub organization/repository availability;
+- package and binary naming;
+- boot-screen and manifest strings;
+- that no existing audio or operating-system product has a conflicting claim.
+
+The name must not inherit “Rockpod”, “Rockbox” or “HFS+” in public product
+identity. Those remain upstream/technical lineage terms where attribution
+requires them, not the name of the new system.
 
 ---
 
