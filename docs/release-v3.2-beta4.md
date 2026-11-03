@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.2 Beta 4 — Thermo-Nuclear
+# HFSPlus Rockboxed iPod V3.2 Beta 4 — Thermo-Nuclear
 
 Release tag: `v3.2-beta4`
 Public version string: `3.2.0-beta4-v13.0`

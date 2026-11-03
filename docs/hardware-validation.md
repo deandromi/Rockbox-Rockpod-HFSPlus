@@ -1,6 +1,6 @@
 # Hardware validation roadmap
 
-This is the hardware-side checklist for Rockpod HFS+ V2.1.1 and later. Host
+This is the hardware-side checklist for HFSPlus Rockboxed iPod V2.1.1 and later. Host
 tests and ARM links do not prove storage, power-loss or bootloader behavior.
 
 **V3.2 Thermo-Nuclear:** the stable release evidence is recorded in

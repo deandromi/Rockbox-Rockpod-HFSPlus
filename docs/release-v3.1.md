@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.1 — “Nuclear and Readable”
+# HFSPlus Rockboxed iPod V3.1 — “Nuclear and Readable”
 
 Status: **DRAFT — DEFERRED.** V3.1 stable was not released. The active test
 line is **V3.2 Beta — “Thermo-Nuclear”**; this document is retained only as the

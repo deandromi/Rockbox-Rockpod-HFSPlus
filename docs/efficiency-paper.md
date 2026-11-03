@@ -1,4 +1,4 @@
-# Rockpod HFS+ Efficiency Paper
+# HFSPlus Rockboxed iPod Efficiency Paper
 
 ## Functional, code, and operational upgrades for the iPod Classic 6G
 
@@ -13,7 +13,7 @@ Date: 2026-11-02.
 
 ## Abstract
 
-Rockpod HFS+ is a HFS+-native Rockbox fork for the iPod Classic 6G. Its
+HFSPlus Rockboxed iPod is a HFS+-native Rockbox fork for the iPod Classic 6G. Its
 efficiency profile is dominated by three things, in order:
 
 1. how long the ATA/iFlash path stays awake;

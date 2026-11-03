@@ -1,7 +1,7 @@
 # shipping.md — build, release, install and verification runbook
 
 Status: source-derived, local build verified 2026-11-01.
-Stable release identity: **Rockpod HFS+ — V3.2 // Version V13.0 — Thermo-Nuclear**.
+Stable release identity: **HFSPlus Rockboxed iPod — V3.2 // Version V13.0 — Thermo-Nuclear**.
 Previous stable: **V3.0 // Version V13.0**.
 Last experimental beta: **V3.2 Beta 4 — Thermo-Nuclear** (historical).
 Current build line: `docs/VERSION` = `3.2.0-v13.0`.
@@ -201,8 +201,8 @@ Use a path **without spaces**. Generated Makefiles contain absolute paths; movin
 ```sh
 mkdir -p "$HOME/Developer"
 cd "$HOME/Developer"
-git clone https://github.com/deandromi/Rockpod-HFSPlus.git
-cd Rockpod-HFSPlus
+git clone https://github.com/deandromi/hfsplus-rockboxed-ipod.git
+cd hfsplus-rockboxed-ipod
 ```
 
 This checkout has no `.git`; if using an archive, extract to a simple path.
@@ -341,7 +341,7 @@ The imported `filesystem-sim.c` still contains upstream `HAVE_DIRCACHE` blocks w
 The documented command is:
 
 ```sh
-cd "$HOME/Developer/Rockpod-HFSPlus-build"
+cd "$HOME/Developer/hfsplus-rockboxed-ipod-build"
 mkdir -p build-ipod6g-database
 cd build-ipod6g-database
 ../tools/configure --target=ipod6g --type=d
@@ -711,7 +711,7 @@ When finished, stop the Apple-device monitor with **Control-C** so paused helper
 
 ### 11.5 First boot
 
-The device should boot Rockpod. If it shows an HFS+ mount error, see §15.
+The device should boot HFSPlus Rockboxed iPod. If it shows an HFS+ mount error, see §15.
 
 ---
 
@@ -753,7 +753,7 @@ Do not use **Initialize Now** or **Update Now** on the iPod as part of this work
 
 - **Settings -> General Settings -> Database -> Auto Update: No.**
 - For initial database verification, leave **Load to RAM** off so disk-based access is checked first.
-- Do not reboot into Rockpod between creating the database and installing the matching index/cache.
+- Do not reboot into HFSPlus Rockboxed iPod between creating the database and installing the matching index/cache.
 
 ### 13.2 Build the database on the Mac
 
@@ -763,7 +763,7 @@ Do not use **Initialize Now** or **Update Now** on the iPod as part of this work
 4. Run the native database tool **from the iPod volume root**:
 
 ```sh
-database_tool="$HOME/Developer/Rockpod-HFSPlus-build/build-ipod6g-database/database.ipod6g"
+database_tool="$HOME/Developer/hfsplus-rockboxed-ipod-build/build-ipod6g-database/database.ipod6g"
 log_dir="$HOME/Documents/iPod bestanden/Logs"
 mkdir -p "$log_dir"
 cd "/Volumes/IPOD" &&
@@ -794,7 +794,7 @@ sync
 diskutil eject "/Volumes/IPOD"
 ```
 
-Disconnect, boot Rockpod, confirm overlay `READY`, then test Database and Cover Flow. After adding or retagging music, repeat the database rebuild and matching index/cache refresh.
+Disconnect, boot HFSPlus Rockboxed iPod, confirm overlay `READY`, then test Database and Cover Flow. After adding or retagging music, repeat the database rebuild and matching index/cache refresh.
 
 ---
 
@@ -1097,7 +1097,7 @@ Unverified: <list>
 Copy and update this block in release notes:
 
 ```markdown
-## Rockpod HFS+ Stable V1.1 // Version V12.1
+## HFSPlus Rockboxed iPod Stable V1.1 // Version V12.1
 
 Target: iPod Classic 6G (ipod6g) only.
 Filesystem: HFS+ version 4, clean unmount required. HFSX/APFS unsupported.

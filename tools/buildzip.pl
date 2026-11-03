@@ -717,10 +717,10 @@ sub buildzip {
     }
     copy("$temp_dir/wps/rockbox_none.sbs", "$temp_dir/wps/rockbox_none.rsbs");
 
-    # Rockpod-bundled themes.  Each theme keeps a ready-to-install
+    # HFSPlus Rockboxed iPod themes.  Each theme keeps a ready-to-install
     # .rockbox tree under themes/<name>/.rockbox. Merge them after the stock
     # WPS build so make zip always contains the matching theme assets/fonts.
-    # SNARTYNEON is included here together with the existing Rockpod themes.
+    # SNARTYNEON is included here together with the existing HFSPlus Rockboxed iPod themes.
     if ($modelname =~ /ipod6g/i && -d "$ROOT/themes") {
         foreach my $theme (glob("$ROOT/themes/*")) {
             next unless -d "$theme/.rockbox";

@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.0 — v3 overlay, power and adapter decomposition
+# HFSPlus Rockboxed iPod V3.0 — v3 overlay, power and adapter decomposition
 
 Release tag: `v3.0.0`
 Public version string: `3.0.0-v13.0`

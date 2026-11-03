@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pause Apple media helpers during a Rockpod DFU bootloader install.
+"""Pause Apple media helpers during an HFSPlus Rockboxed iPod DFU bootloader install.
 
 Run in Terminal 1, install the bootloader in Terminal 2, then press Control-C
 here. The finally block resumes every helper this script paused.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Read-only validation and conflict checks for a Rockpod .rockpod-rw file.
+"""Read-only validation and conflict checks for an HFSPlus Rockboxed iPod overlay.
 
 This mirrors the adapter's persistent overlay validation.  It is used by the
 Mac installers so a shadowing/tombstoned target is detected before any live

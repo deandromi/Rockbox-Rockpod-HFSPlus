@@ -1,4 +1,4 @@
-# HFS+ / Rockpod bugfix list
+# HFS+ / HFSPlus Rockboxed iPod bugfix list
 
 Status: **V3.0: host/build verified and device boot confirmed; six documented format limits remain. Power-loss/power matrix remains tracked in issue #77.**
 Companion evidence log: `docs/hfsplus-audit.md` (HFS-001..HFS-133).
@@ -291,8 +291,8 @@ The bootloader and firmware both use `hfsplus_mount()` and therefore the overlay
 2. **Record native identity.** Use `hfs_ro_lookup`/`hfsplus-inspect` to obtain `.rockbox`’s native CNID; check volume attribute bit 12 (`kHFSCatalogNodeIDsReusedBit`).
 3. **Inspect overlay root.** Parse entries with `parent == 2`; list `flags`, `base_id`, `name`, `kind`. A `TOMBSTONE` (`flags & 8`) with `base_id == .rockbox CNID` is the direct suspect (HFS-090/119).
 4. **Check boot file.** Look for overlay entries/tombstones named `rockbox.ipod` (HFS-118).
-5. **Check native.** `diskutil verifyVolume`; if no overlay explanation, inspect the native catalog/root; Rockpod never writes native metadata. Validate leaf-key parent/name ordering (HFS-126): a single out-of-order key can hide `.rockbox` while every individual record still parses.
-6. **Recovery.** The low-risk fix is to make the bootloader mount native-only (HFS-117), then diagnose/repair the overlay read-only. Do not format or zero the header. If the catalog itself is inconsistent, use a Mac-side backup/repair path before booting Rockpod.
+5. **Check native.** `diskutil verifyVolume`; if no overlay explanation, inspect the native catalog/root; HFSPlus Rockboxed iPod never writes native metadata. Validate leaf-key parent/name ordering (HFS-126): a single out-of-order key can hide `.rockbox` while every individual record still parses.
+6. **Recovery.** The low-risk fix is to make the bootloader mount native-only (HFS-117), then diagnose/repair the overlay read-only. Do not format or zero the header. If the catalog itself is inconsistent, use a Mac-side backup/repair path before booting HFSPlus Rockboxed iPod.
 
 ## 11. Recommended fix order
 

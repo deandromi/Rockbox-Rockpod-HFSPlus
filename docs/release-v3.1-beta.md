@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.1 Beta — read-only Rockbox USB
+# HFSPlus Rockboxed iPod V3.1 Beta — read-only Rockbox USB
 
 > **Superseded by [V3.1 Beta 5](release-v3.1-beta5.md).** Beta 1 had a
 > bulk-only write-rejection bug and did not present the HFS+ MBR type.

@@ -1,4 +1,4 @@
-# Rockpod HFS+ V2 Final Legacy — V1/V2 conclusion
+# HFSPlus Rockboxed iPod V2 Final Legacy — V1/V2 conclusion
 
 Release tag: `v2-final`
 Public version string: `2.1.1-v12.3` (the final V2 line)

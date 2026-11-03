@@ -1,4 +1,4 @@
-# agents.md — working contract for Rockbox-Rockpod-HFSPlus
+# agents.md — working contract for HFSPlus Rockboxed iPod
 
 Status: reviewed 2026-11-02 for V3.2.
 Target: **iPod Classic / 6G (`ipod6g`, target ID 71) only**.
@@ -47,7 +47,7 @@ This checkout may be a source snapshot. Use a real git clone for history, branch
 
 ## 1. Project shape
 
-Rockpod HFS+ is a fork of [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org).
+HFSPlus Rockboxed iPod is a fork of [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org).
 
 Custom code:
 
@@ -85,7 +85,7 @@ power-on
            -> overlay_load()          [firmware only]
         -> fat_mount()                [only on HFSPLUS_NOT_HFS]
      -> load_firmware("/.rockbox/rockbox.ipod")
-  -> Rockpod firmware
+  -> HFSPlus Rockboxed iPod firmware
      -> fat_init() -> hfsplus_init()
      -> same scanner/mount path
      -> applications
@@ -94,7 +94,7 @@ power-on
 Important:
 
 - The HFS+ bootloader mounts **native HFS+ only**. It does not load overlay state and does not build the full directory/CNID index.
-- The bootloader and firmware use the same partition scanner. A regression there also breaks FAT32 Rockpod.
+- The bootloader and firmware use the same partition scanner. A regression there also breaks FAT32 fallback.
 - The overlay is required for writes. A missing or invalid overlay leaves the volume readable but read-only.
 
 ### 2.1 Mount and recovery

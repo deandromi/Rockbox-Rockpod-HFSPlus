@@ -1,20 +1,22 @@
-# Rockpod HFS+
+# HFSPlus Rockboxed iPod
+
+**HFS+ Rockbox for the iPod Classic 6G.**
 
 **V3.2 // Version V13.0 — Thermo-Nuclear**
 
 **Previous stable: V3.0 // Version V13.0. Legacy: V2.0-Final.**
 
-Rockpod HFS+ is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
+HFSPlus Rockboxed iPod is a Rockbox/Rockpod build for the **iPod Classic 6G (`ipod6g`)** that boots from HFS+ and keeps writable state in a preallocated `/.rockpod-rw` container. It is for Mac-formatted iPods that should stay HFS+.
 
 Built for the iPod Classic 6G. Compatibility depends on the Classic revision, storage adapter and HFS+ layout; test on your own device before relying on it.
 
 ## Why this exists
 
-FAT32 can be unreliable on some iPods. Rockpod HFS+ keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume. Rockpod HFS+ also exists for huge efficiency upgrades, actual stable firmware and bootloaders, anti-corruption protection and more! If any of these functionalities pose great advantages on your installation, consider starring this repository, it's much appreciated (:
+FAT32 can be unreliable on some iPods. HFSPlus Rockboxed iPod keeps the music library as ordinary HFS+ files, leaves Apple's catalog and journal untouched, and isolates Rockbox writes in the overlay. macOS can still read the music volume. HFSPlus Rockboxed iPod also exists for huge efficiency upgrades, actual stable firmware and bootloaders, anti-corruption protection and more! If any of these functionalities pose great advantages on your installation, consider starring this repository, it's much appreciated (:
 
 ## Important!
 
-Please make a decision between picking either: the newer post V2 releases or the V2-Final release. This is important because the writeable overlay used in Rockpod HFS+ is not backwards compatible as of V3. V3 itself poses some strong advantages including power efficiency, better corruption protection and soon the ability to build coverflow-cache and music-database building on the iPod itself instead of on a Mac. V2 is however currently widely tested and is verified to work on most iPods, but if a bug in V2 is found, no matter how important, it will not get fixed. V3.2 Thermo-Nuclear is the recommended option as of November 2nd 2026. Also keep in mind that if you haven't yet formatted your iPod to HFS+ that it will lose all its data anyway, make sure to make backups and transfer existing music and playlists to a different device. V3.2 currently shows improved battery life as well, even by a mile compared to the original Rockbox firmware and bootloader, my own iPod lasted almost 2 hours longer on the same battery from 100% to 0%.
+Please make a decision between picking either: the newer post V2 releases or the V2-Final release. This is important because the writeable overlay used in HFSPlus Rockboxed iPod is not backwards compatible as of V3. V3 itself poses some strong advantages including power efficiency, better corruption protection and soon the ability to build coverflow-cache and music-database building on the iPod itself instead of on a Mac. V2 is however currently widely tested and is verified to work on most iPods, but if a bug in V2 is found, no matter how important, it will not get fixed. V3.2 Thermo-Nuclear is the recommended option as of November 2nd 2026. Also keep in mind that if you haven't yet formatted your iPod to HFS+ that it will lose all its data anyway, make sure to make backups and transfer existing music and playlists to a different device. V3.2 currently shows improved battery life as well, even by a mile compared to the original Rockbox firmware and bootloader, my own iPod lasted almost 2 hours longer on the same battery from 100% to 0%.
 
 ## Quick facts
 
@@ -26,16 +28,16 @@ Please make a decision between picking either: the newer post V2 releases or the
 | Safe transfer mode | **Apple Disk Mode for writes; Rockbox USB mass storage is read-only** |
 | Writable state | `/.rockpod-rw`, 4 KiB blocks, 2,048 entries max, v3 cache |
 | Install platform | macOS |
-| Release | [V3.2](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.2.0) |
-| Previous stable | [V3.0](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v3.0.0) |
+| Release | [V3.2](https://github.com/deandromi/hfsplus-rockboxed-ipod/releases/tag/v3.2.0) |
+| Previous stable | [V3.0](https://github.com/deandromi/hfsplus-rockboxed-ipod/releases/tag/v3.0.0) |
 
 V3.2 builds on V3.0 without changing the v3 overlay: warm directory/CNID index cache, fewer overlay header flushes, faster database/album-art/path lookups, read-only stream read-ahead, and read-only extents-overflow support for large plugin data files. It also removes the V3.2 beta boot freeze and restores the known-good sleep/wake power path. On the test iPod this produced an owner-reported almost **2 hours of extra battery life**; V3.0 did most of the architectural work, and V3.2 fixes the bugs that kept it from being felt. See [`docs/release-v3.2.md`](docs/release-v3.2.md).
 
 V3.0 introduced the required v3 overlay format with a resumable initializer, high-water entry reads and a persistent directory/CNID index cache, and fixed overlay timestamps, initialization fail-closed behavior and the Disk Info list overflow. **V3 and up requires a new v3 overlay if you haven't installed one already or currently have a V1/2 or V2-Final overlay; v1/v2 containers are backup/recovery material only and are not migrated.** See [`BUGFIXES.md`](BUGFIXES.md) and [`docs/release-v3.0.md`](docs/release-v3.0.md).
 
-**Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/Rockbox-Rockpod-HFSPlus/releases/tag/v2-final)
+**Legacy V1/V2 line:** [V2 Final](https://github.com/deandromi/hfsplus-rockboxed-ipod/releases/tag/v2-final)
 is the final V2.1.1 package. It keeps an existing v1/v2 overlay and does not
-require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then you will not receive future overlay, bootloader and firmware updates. **!Switching between V2 and post V2 versions causes data loss due to the overlay being rewritten, the following data will get lost: Files/directories created by Rockpod, Playlists, Settings, Coverflow-cache, Directory changes, Scrobble data and Timestamps.**
+require the V3.0 new-overlay. If you've already installed V1/2 or V2-Final then you will not receive future overlay, bootloader and firmware updates. **!Switching between V2 and post V2 versions causes data loss due to the overlay being rewritten, the following data will get lost: Files/directories created by HFSPlus Rockboxed iPod, Playlists, Settings, Coverflow-cache, Directory changes, Scrobble data and Timestamps.**
 
 ## Compatibility and limits
 
@@ -64,7 +66,7 @@ Download the release assets, or build them from source. Back up the iPod and `.r
 
 ### 1. Back up, enter Disk Mode, and format HFS+
 
-**Formatting erases the iPod.** Back up first. The HFS+ bootloader and Rockpod firmware are then installed separately.
+**Formatting erases the iPod.** Back up first. The HFS+ bootloader and HFSPlus Rockboxed iPod firmware are then installed separately.
 
 Enter Apple Disk Mode:
 
@@ -84,7 +86,7 @@ diskutil verifyVolume "/Volumes/IPOD"
 
 If `/Volumes/IPOD` is not the mount point, use the actual path. Do not skip the backup: a failed DFU install or an Apple firmware restore can erase the iPod.
 
-A new installation must use HFS+. If the iPod is already HFS+ and contains a working Rockpod install, skip the format command and continue at step 2.
+A new installation must use HFS+. If the iPod is already HFS+ and contains a working HFSPlus Rockboxed iPod install, skip the format command and continue at step 2.
 
 Format with the terminal, not Disk Utility. Identify the correct whole disk by its size and model, not by a disk number copied from this example:
 
@@ -100,7 +102,7 @@ diskutil unmountDisk /dev/diskN
 sudo diskutil eraseDisk JHFS+ IPOD APM /dev/diskN
 ```
 
-This creates a clean Apple Partition Map with one journaled HFS+ volume. It removes the Apple firmware partition and all data. The HFS+ bootloader is required to boot Rockpod afterwards. If your macOS version rejects `APM`, use `GPT` in the same command. If you need the Apple firmware/dual-boot layout, restore the iPod with Finder before starting over.
+This creates a clean Apple Partition Map with one journaled HFS+ volume. It removes the Apple firmware partition and all data. The HFS+ bootloader is required to boot HFSPlus Rockboxed iPod afterwards. If your macOS version rejects `APM`, use `GPT` in the same command. If you need the Apple firmware/dual-boot layout, restore the iPod with Finder before starting over.
 
 ### 2. Create a new v3 overlay (mandatory)
 
@@ -110,7 +112,7 @@ artwork stored only in the old overlay are not imported; this is the cost of the
 v3 format until a migration tool exists.
 
 ```sh
-backup="$HOME/rockpod-overlay-backup-$(date +%Y%m%d-%H%M%S)"
+backup="$HOME/hfsplus-rockboxed-ipod-overlay-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$backup"
 
 if [ -e "/Volumes/IPOD/.rockpod-rw" ]; then
@@ -254,12 +256,12 @@ tools/rockpod/build-database-macos.sh
 Mount the iPod in Apple Disk Mode, then back up the native database files and check that the overlay is not hiding them. Run this from the source checkout:
 
 ```sh
-backup="$HOME/Documents/rockpod-backups/database"
+backup="$HOME/Documents/hfsplus-rockboxed-ipod-backups/database"
 mkdir -p "$backup"
 cd "/Volumes/IPOD"
 cp .rockbox/database*.tcd "$backup"/ 2>/dev/null || true
 
-cd "/path/to/Rockpod-HFSPlus"
+cd "/path/to/hfsplus-rockboxed-ipod"
 python3 - <<'PYOVERLAY'
 from pathlib import Path
 import sys
@@ -282,11 +284,11 @@ If the check stops, do not continue. Resolve the reported overlay entries using 
 Run the database tool **from the iPod root**, not with a music-directory argument. Keep the Mac awake:
 
 ```sh
-backup="$HOME/Documents/rockpod-backups/database"
+backup="$HOME/Documents/hfsplus-rockboxed-ipod-backups/database"
 mkdir -p "$backup"
 # Use an absolute path. Examples:
 # built from source:  /path/to/source/build-ipod6g-database/database.ipod6g
-# release asset:      /path/to/rockpod-v2.0/database.ipod6g
+# release asset:      /path/to/hfsplus-rockboxed-ipod-v2.0/database.ipod6g
 database_tool="/absolute/path/to/database.ipod6g"
 cd "/Volumes/IPOD"
 test -d .rockbox
@@ -310,7 +312,7 @@ From the source checkout:
 ```sh
 python3 tools/rockpod/build_rockpod_coverflow_index.py \
   --ipod "/Volumes/IPOD" \
-  --output-dir "$HOME/Documents/rockpod-backups" \
+  --output-dir "$HOME/Documents/hfsplus-rockboxed-ipod-backups" \
   --install
 
 python3 tools/rockpod/build_rockpod_pictureflow_cache.py \
@@ -329,7 +331,7 @@ diskutil eject "/Volumes/IPOD"
 
 ### 7. First boot
 
-1. Rockpod starts normally.
+1. HFSPlus Rockboxed iPod starts normally.
 2. Open **Debug → Disk Info** and confirm:
    ```text
    HFS+ overlay: READY
@@ -370,13 +372,13 @@ A damaged overlay must be copied and inspected before repair. Deleting `.rockpod
 
 1. Re-enter Apple Disk Mode and reinstall `rockbox.zip`.
 2. If the bootloader is damaged, reinstall it over DFU using step 3.
-3. As a last resort, restore the Apple firmware with Finder. This erases the iPod and all Rockpod data.
+3. As a last resort, restore the Apple firmware with Finder. This erases the iPod and all HFSPlus Rockboxed iPod data.
 
 Do not delete `.rockpod-rw` as a first response; it contains settings, databases, playlists and overlay files.
 
-### Finder does not show Rockpod-created files
+### Finder does not show files created by HFSPlus Rockboxed iPod
 
-macOS sees only the native HFS+ tree. Files created or changed inside Rockpod live in `.rockpod-rw` and are not merged into Finder. To inspect or back them up while the iPod is in Apple Disk Mode:
+macOS sees only the native HFS+ tree. Files created or changed inside HFSPlus Rockboxed iPod live in `.rockpod-rw` and are not merged into Finder. To inspect or back them up while the iPod is in Apple Disk Mode:
 
 ```sh
 python3 tools/rockpod/export_overlay.py --ipod "/Volumes/IPOD"
@@ -444,10 +446,10 @@ make -C tools/hfsplus sanitize
 python3 tools/hfsplus/tests/check_integration.py
 ```
 
-V3.0 passes 20 reader tests, 7 partition tests and 30 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.0.md`](docs/release-v3.0.md).
+V3.2 passes 21 reader tests, 7 partition tests and 39 adapter tests, including ASan/UBSan. Firmware, Thumb bootloader, database tool, `mks5lboot`, DFU and `rockbox.zip` build. The release hashes are in [`docs/release-v3.2.md`](docs/release-v3.2.md).
 
 ## License and credits
 
-Rockpod HFS+ is based on [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org). Rockbox and this project are licensed under GPL-2.0-or-later; see [`COPYING`](COPYING) and [`docs/CREDITS`](docs/CREDITS).
+HFSPlus Rockboxed iPod is based on [Rockpod by nuxcodes](https://github.com/nuxcodes/rockpod), itself a fork of [Rockbox](https://www.rockbox.org). Rockbox and this project are licensed under GPL-2.0-or-later; see [`COPYING`](COPYING) and [`docs/CREDITS`](docs/CREDITS).
 
 The HFS+ layer, bootloader changes and audit fixes are project-specific. The original Rockpod features remain credited to their authors.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Export the read-only contents of a Rockpod .rockpod-rw overlay.
+"""Export the read-only contents of an HFSPlus Rockboxed iPod overlay (`.rockpod-rw`).
 
-macOS/Finder sees only the native HFS+ tree.  Rockpod-created files, settings
+macOS/Finder sees only the native HFS+ tree.  Files created by HFSPlus Rockboxed iPod, settings
 and databases live inside .rockpod-rw.  This tool reconstructs their paths
 from HFS+ CNIDs (st_ino) and overlay parent IDs and copies them to a normal
 Mac folder for inspection or backup.  It never modifies the iPod.
@@ -116,7 +116,7 @@ def main() -> int:
     except overlay_check.OverlayError as exc:
         if "unknown overlay magic" in str(exc):
             print("STOP: .rockpod-rw is empty or not initialized. "
-                  "Boot Rockpod once so it can create the overlay.", file=sys.stderr)
+                  "Boot HFSPlus Rockboxed iPod once so it can create the overlay.", file=sys.stderr)
         else:
             print(f"STOP: cannot read overlay: {exc}", file=sys.stderr)
         return 2
@@ -170,7 +170,7 @@ def main() -> int:
             for row in manifest:
                 f.write("\t".join(str(v) for v in row) + "\n")
         (args.output / "README.txt").write_text(
-            "Read-only export of Rockpod's .rockpod-rw overlay.\n"
+            "Read-only export of the HFSPlus Rockboxed iPod .rockpod-rw overlay.\n"
             "Files marked 'native' are already visible in the native HFS+ tree.\n"
             "This export is not merged back into the iPod by this tool.\n",
             encoding="utf-8")

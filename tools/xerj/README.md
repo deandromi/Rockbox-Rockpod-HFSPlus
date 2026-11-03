@@ -77,7 +77,7 @@ machine-specific and git-ignored. By hand it looks like:
     "servers": {
       "xerj": {
         "type": "local",
-        "command": ["/absolute/path/to/Rockbox-Rockpod-HFSPlus/tools/xerj/mcp.sh"],
+        "command": ["/absolute/path/to/hfsplus-rockboxed-ipod/tools/xerj/mcp.sh"],
         "environment": { "XERJ_URL": "http://127.0.0.1:9200" }
       }
     }

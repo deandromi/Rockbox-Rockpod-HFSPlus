@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build Rockpod PictureFlow .pfraw files on macOS without Rockpod's dithering.
+Build HFSPlus Rockboxed iPod PictureFlow .pfraw files on macOS without inherited dithering.
 
 Defaults:
   Music: /Volumes/IPOD/Music
@@ -13,7 +13,7 @@ Requirements:
 This script:
   1. Finds album folders containing cover.jpg
   2. Tries audio files until it finds usable album + album_artist tags
-  3. Calculates Rockpod's modified-FNV cache filename
+  3. Calculates the modified-FNV cache filename
   4. Converts cover.jpg to 128x128 RGB
   5. Packs it as non-dithered RGB565 in PictureFlow's transposed layout
   6. Builds all new .pfraw files in a temporary folder first
@@ -92,7 +92,7 @@ def get_tags(track: Path) -> tuple[str, str]:
 
 
 def mfnv(text: str) -> int:
-    """Rockpod's modified FNV hash, with C-style uint32 overflow."""
+    """the modified FNV hash, with C-style uint32 overflow."""
     p = 16777619
     h = 0x811C9DC5
 
@@ -109,7 +109,7 @@ def mfnv(text: str) -> int:
 
 
 def cache_filename(album: str, album_artist: str) -> str:
-    # Rockpod uses snprintf("%x%x.pfraw", hash_album, hash_artist)
+    # The cache uses snprintf("%x%x.pfraw", hash_album, hash_artist)
     return f"{mfnv(album):x}{mfnv(album_artist):x}.pfraw"
 
 
@@ -252,7 +252,7 @@ def fsync_dir(path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build non-dithered Rockpod PictureFlow .pfraw cache files."
+        description="Build non-dithered HFSPlus Rockboxed iPod PictureFlow .pfraw cache files."
     )
     parser.add_argument(
         "--music",

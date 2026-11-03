@@ -1,4 +1,4 @@
-# Rockpod HFS+ V1.1 — release notes
+# HFSPlus Rockboxed iPod V1.1 — release notes
 
 Release tag: `v1.1`
 Base: `main` (V12.0) plus the V1.1 release-blocker fixes

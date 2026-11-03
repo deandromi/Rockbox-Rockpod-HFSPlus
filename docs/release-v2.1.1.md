@@ -1,4 +1,4 @@
-# Rockpod HFS+ V2.1.1 — legacy overlay recovery
+# HFSPlus Rockboxed iPod V2.1.1 — legacy overlay recovery
 
 Release tag: `v2.1.1`
 Base: `main` (V2.1 / V12.3) plus the legacy overlays fix

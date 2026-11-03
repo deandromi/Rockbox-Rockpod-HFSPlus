@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.0 Beta 2 — Disk Info hotfix
+# HFSPlus Rockboxed iPod V3.0 Beta 2 — Disk Info hotfix
 
 Release tag: `v3.0-beta2`
 Public version string: `3.0.0-beta2-v13.0`

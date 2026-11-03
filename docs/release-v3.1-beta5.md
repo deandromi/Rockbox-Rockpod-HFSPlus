@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.1 Beta 5 — read-only Rockbox USB that macOS mounts
+# HFSPlus Rockboxed iPod V3.1 Beta 5 — read-only Rockbox USB that macOS mounts
 
 Release tag: `v3.1-beta5`
 Public version string: `3.1.0-beta5-v13.0`
@@ -78,7 +78,7 @@ sync
 diskutil eject "/Volumes/IPOD"
 ```
 
-Boot Rockpod, then connect in Rockbox USB mode. macOS should mount the volume
+Boot HFSPlus Rockboxed iPod, then connect in Rockbox USB mode. macOS should mount the volume
 read-only. Use Apple Disk Mode for all writes, backups and repairs.
 
 ## Limitations

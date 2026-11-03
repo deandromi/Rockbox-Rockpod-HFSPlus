@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare Rockpod v12 iPod6G PictureFlow index/config/empty slide on a Mac.
+"""Prepare HFSPlus Rockboxed iPod v12 iPod6G PictureFlow index/config/empty slide on a Mac.
 Uses the already committed 0x54434810 Rockbox database; never scans audio tags.
 Default is staging only. --install backs up and installs native HFS+ files,
 but refuses installation if relevant overlay entries could shadow them.

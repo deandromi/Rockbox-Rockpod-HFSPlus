@@ -1,4 +1,4 @@
-# Rockpod HFS+ V3.1 Beta 2 — read-only USB protocol fix
+# HFSPlus Rockboxed iPod V3.1 Beta 2 — read-only USB protocol fix
 
 > **Superseded by [V3.1 Beta 5](release-v3.1-beta5.md).** Beta 2 fixed the
 > write data-out drain, but macOS still saw the stale FAT32 MBR type and could
