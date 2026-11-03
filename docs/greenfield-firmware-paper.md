@@ -1,4 +1,4 @@
-# Helikon-OS: A Native HFS+ Bootloader and Firmware for the iPod Classic 6G
+# Helikon-OS: A Native HFS+ Bootloader and Firmware for the iPod Classic 6th and 7th Generation
 
 ### A line-audited design study of the HFSPlus Rockboxed iPod tree
 
@@ -58,6 +58,7 @@ Revision 2 changes the paper in five places:
 - [25. Open design decisions](#25-open-design-decisions)
 - [26. A non-coder's build path](#26-a-non-coders-build-path)
 - [27. Assembly order and handoff checklist](#27-assembly-order-and-handoff-checklist)
+- [28. Product goals and engineering commitments](#28-product-goals-and-engineering-commitments)
 - [Appendix A — Custom file ledger](#appendix-a--custom-file-ledger)
 - [Appendix B — Inherited hotspot ledger](#appendix-b--inherited-hotspot-ledger)
 - [Appendix C — Verdict summary](#appendix-c--verdict-summary)
@@ -94,7 +95,8 @@ at every metadata change**:
 - a tiny native-HFS+ bootloader that verifies and loads firmware and never
   writes the filesystem;
 - a firmware built from a clean HAL, block layer, HFS+ read-write engine, VFS,
-  host-built database, first-party player/UI and read-only USB;
+  host-built database first and incremental on-device builder later, first-party
+  player/UI and read-only USB;
 - a real HFS+ journal/transaction engine, not an overlay;
 - explicit power states, flush barriers and errors;
 - no destructive repair actions and no hidden native-write fallback.
@@ -105,21 +107,30 @@ The priority order is deliberate:
 2. crash consistency and `fsck_hfs` compatibility;
 3. read-only playback and library browsing;
 4. database, UI and first-party features;
-5. migration, host tools and optional plugins.
+5. migration, desktop tools, skins, apps/games and the ecosystem goals in §28.
 
 If a feature conflicts with priority 1 or 2, the feature waits. Straight
 writable HFS+ is the defining promise of Helikon-OS, not a later optimization.
+
+The product goals in the Helikon-OS README—battery life, cleaner interfaces,
+Rockbox skin compatibility, RAM use, adapter support, database building,
+updates, installation, anti-corruption, games and applications, DAC/audio,
+podcasts, album and artist views, car playback, the desktop app and wider device
+support—are treated as engineering commitments in §28. Each one gets a priority,
+a design, an acceptance test and an honest statement of what is not promised.
 
 ---
 
 ## 1. Mandate and constraints
 
-The exercise assumes a new bootloader and firmware for the iPod Classic 6G,
-possibly expanding to other S5L8702 iPods later. The hardware facts are fixed:
+The exercise assumes a new bootloader and firmware for the iPod Classic 6th
+generation. The 7th generation is the next named target; other S5L8702 iPods and
+other players are ports, not assumptions. The 6G hardware facts are the reference:
 
 | Constraint | Value |
 |---|---|
-| SoC | Samsung S5L8702, ARM926EJ-S |
+| SoC | Samsung S5L8702, ARM926EJ-S (6G reference; 7G board audit required) |
+| Target | iPod Classic 6G first; 7G next; other devices are ports |
 | RAM | 64 MiB |
 | Storage | ATA/LBA48, 512-byte logical sectors, 4096-byte virtual/physical support |
 | Display | 320×240, 16-bit colour |
@@ -127,8 +138,8 @@ possibly expanding to other S5L8702 iPods later. The hardware facts are fixed:
 | Audio | CS42L55 codec, lineout, headphone |
 | Power | PMU, battery, charging, backlight, ATA sleep |
 | Boot | Apple NOR path, DFU, dual-boot bootloader, `MOVE_AREA` limit |
-| Filesystem | HFS+ v4 native; FAT fallback for non-HFS+ volumes |
-| Host | macOS for installation, database and artwork tools |
+| Filesystem | HFS+ v4 native only; no overlay; no FAT mount |
+| Host | macOS first for installation, database and artwork; Windows/Linux desktop app later |
 
 Non-negotiable safety rules carried into the new design:
 
@@ -191,8 +202,8 @@ At the audit date:
 | `tools/` | 247 | 70,170 | host tools, tests, inspectors | Keep / rewrite |
 | `bootloader/` | 41 | 12,371 | bootloader and shared boot code | Selective keep |
 | `utils/` | 18 | 4,283 | mks5lboot and utilities | Keep / harden |
-| `themes/` | 133 | 55,636 | theme assets | Select one |
-| `wps/` | 245 | 80,427 | Rockbox WPS/skin files | Exclude most |
+| `themes/` | 133 | 55,636 | theme assets | One default + compatibility corpus |
+| `wps/` | 245 | 80,427 | Rockbox WPS/skin files | Documented compatibility subset |
 | `fonts/` | 90 | large (binary/BDF) | font assets | Select two or three |
 | `icons/` | 58 | 21,566 | icon assets | Select a set |
 | `docs/` | 49 | 11,505 | design, audit, release, validation | Keep |
@@ -221,7 +232,7 @@ That is the part worth preserving first.
 A new firmware should be **a small, recovery-first system with a real HFS+
 read-write engine**, a clean VFS and a first-party player/UI, rather than a
 general-purpose Rockbox distribution with an HFS+ adapter bolted into the FAT
-layer. There is no namespace overlay in Helikon-OS.
+layer. There is no namespace overlay and no FAT mount in Helikon-OS.
 
 ---
 
@@ -394,8 +405,9 @@ the caller. No “return 0 because the device is probably fine.”
 4096 bytes, handles extended/logical MBR, and chooses the HFS+ candidate.
 
 **Verdict: K.** Keep, expand malformed-table tests, never write the partition
-table. The USB MBR relabel is a RAM-only presentation detail and must remain
-RAM-only.
+table. The scanner still parses APM/MBR/GPT/raw layouts, but Helikon-OS does not
+mount FAT: a non-HFS+ candidate returns `NOT_HFS`. The USB MBR relabel is a
+RAM-only presentation detail and must remain RAM-only.
 
 ### 8.2 HFS+ read-only core
 
@@ -593,7 +605,9 @@ Mode for writes. That is a product decision, not a code shortcut.
 
 The current VFS is FAT-shaped. HFS+ is dispatched through `fat_is_readonly()`
 inside FAT functions; path resolution scans directories with `readdir`; file
-handles carry FAT-specific state; dircache is disabled for HFS+.
+handles carry FAT-specific state; dircache is disabled for HFS+. `hfsplus_fat`
+is a donor module name, not a commitment to FAT: Helikon-OS mounts HFS+ only and
+uses a clean `fs_ops` adapter.
 
 ### 10.2 Verdict
 
@@ -757,7 +771,8 @@ policy.**
   control-file machinery.
 - **M:** album-art probing: one directory result cache, explicit invalidation,
   no silent negative caching across changes.
-- **D:** on-device full database rebuild. Keep it host-side until proven safe.
+- **D (P1):** host-built database first; an incremental, resumable on-device
+  builder later (§28.4.1). A full in-RAM rebuild is not planned.
 - **X:** dircache, changelog command queue, legacy tagcache formats.
 
 A new database might be:
@@ -770,14 +785,13 @@ indexes: path hash, artist/album sorted, title sorted
 runtime stats log: play counts, ratings, resume points (native file, transactional)
 ```
 
-Built on macOS, validated on mount, memory-mapped/read-only on device.
+Built on macOS first; the same schema is used by the incremental on-device builder. Validated on mount, memory-mapped/read-only on device.
 
 Because Helikon-OS can now create and delete native files, the database is a
 cache, not the source of truth. Every path is validated against the catalog when
 it is opened. A missing or stale entry falls back to a directory scan and
-reports `DB_STALE`; it is never presented as “file missing.” A full on-device
-rebuild stays deferred until the host-built path and the write engine are
-proven.
+reports `DB_STALE`; it is never presented as “file missing.” The incremental
+on-device builder is P1 (§28.4.1); a full in-RAM rebuild is not planned.
 
 ---
 
@@ -824,9 +838,11 @@ sample rates, gapless where supported, lineout/headphone switching, safe volume.
   layout knowledge.
 - **M:** viewport/layout concepts, click-wheel acceleration.
 - **R:** screen stack, menus, list rendering, theme engine.
-- **X:** the full WPS/skin language, 133 themes, recorder UI.
-- **D:** user themes; define a new simple theme format after the core UI is
-  stable.
+- **X:** the full WPS/skin engine, 133 bundled themes, recorder UI.
+- **M (P1):** a documented Rockbox WPS subset through a compatibility layer
+  (§28.3.4).
+- **D:** a new native theme format after the core UI is stable; the Rockbox
+  subset is a compatibility path, not the design centre.
 
 A new UI should be retained-mode and declarative:
 
@@ -863,6 +879,11 @@ firmware should ship first-party features only. If plugins return, they need:
 Until that exists, “plugins” means “first-party features.” PictureFlow, album
 art and the database browser should be product features, not plugins.
 
+The README goals for **custom games** and **custom applications** are not the
+Rockbox plugin API and do not reopen this decision. They are a new, sandboxed
+runtime with a small host API, quotas and a signature/trust model
+(§28.3.9–§28.3.10). Legacy Rockbox plugin binaries remain unsupported.
+
 ---
 
 ## 16. USB, DFU and updates
@@ -876,11 +897,13 @@ layout.
 
 ### 16.2 Verdict
 
-**Keep read-only USB and DFU; redesign update verification.**
+**Keep read-only USB and DFU; redesign update verification; add an optional desktop service mode.**
 
 - **K:** read-only LUN, RAM-only MBR relabel, DFU transport, dual-boot button
   map, Apple NOR preservation.
 - **M:** USB descriptors and error paths; explicit “read-only” reporting.
+- **M (P1):** an optional vendor-specific USB service mode for the desktop app;
+  framed file operations through the VFS, never a writable mass-storage LUN.
 - **R:** firmware update flow: manifest, hash, signature, rollback policy.
 - **X:** writeable USB mass storage on HFS+; host writes that bypass the HFS+
   transaction engine; `--single`.
@@ -926,6 +949,9 @@ not staged on HFS+. This is an open design decision; see §25.
   - host test and fuzz targets in CI;
   - deterministic asset pipeline.
 - **R:** host database/artwork tools for the new schema.
+- **R (P1):** a new desktop application for install, backup, tagging, ratings,
+  scrobbling, file transfer and package management; macOS first, Windows/Linux
+  after the USB service mode (§28.4.2).
 - **X:** `tools/xerj` from the firmware repo (optional research tool, not
   product).
 
@@ -949,13 +975,19 @@ Modify:
 
 - rename the product consistently;
 - replace “Rockbox feature list” docs with a product spec;
-- keep a live risk register and decision log.
+- keep a live risk register and decision log;
+- publish the §28.6 goal scorecard in every stable release;
+- add a contribution guide, code of conduct, security policy and RFC process;
+- document release channels, support windows and device-port status;
+- maintain a public device/adapter/receiver/skin compatibility matrix.
 
 Exclude:
 
 - claims that host tests equal device validation;
 - release notes that hide unexecuted stress gates;
-- instructions that treat format/erase as a first response.
+- feature claims that are not tied to the goal scorecard;
+- instructions that treat format/erase as a first response;
+- a release process that depends on one person’s laptop or an unpublished key.
 
 ---
 
@@ -983,9 +1015,11 @@ Apple NOR boot ROM
                   extents + overflow
                   journal / transaction commit
                 VFS
-                  database (immutable, host-built)
+                  database (host-built first, incremental on-device later)
                   player/audio
                   UI
+                    skin compatibility (optional)
+                  app/game sandbox (optional)
                   USB read-only
                   diagnostics
 ```
@@ -1003,7 +1037,9 @@ Apple NOR boot ROM
 | Database | immutable metadata and index | playback state |
 | Player | buffer, decode, output | filesystem internals |
 | UI | screens, input, rendering | storage policy |
-| USB | LUN, descriptors | filesystem writes |
+| Skin compat | WPS subset parsing and scene mapping | raw storage, playback policy |
+| App/game runtime | sandbox, quotas, host API | raw block/NOR/PMU access |
+| USB | LUN, descriptors, optional service mode | filesystem writes |
 | Diagnostics | events, counters, recovery | product policy |
 
 There is no overlay layer, no namespace merge and no second write path. Every
@@ -1023,6 +1059,8 @@ mutation goes through the HFS+ write engine and the journal/transaction layer.
   measured;
 - audio: codec + buffer;
 - UI: one screen + one theme;
+- skin compatibility: parsed scene and image cache, hard-capped;
+- app/game sandbox: quota, not reserved when unused;
 - reserve for recovery/diagnostics.
 
 Every cache needs a maximum and an eviction policy. No unbounded `core_alloc`.
@@ -1037,8 +1075,10 @@ changes anything.
 - native metadata written only through the transaction engine, with ordering
   and checksums;
 - journal replay is bounded and idempotent;
+- data checksums and scrub detect corruption without silent repair;
 - path names length-checked, no traversal;
-- plugins only with capabilities, or not at all;
+- legacy plugins are excluded; apps/games run only in the sandbox with
+  capabilities, quotas and a crash boundary;
 - DFU installer verifies the image and refuses `--single`;
 - no secrets on the device; no network.
 
@@ -1069,12 +1109,20 @@ changes anything.
 | Memory exhaustion | Audio/UI failure | Hard budgets, bounded caches, no full DB RAM copy by default. |
 | Audio regression | Poor product | Codec/DSP tests, device audio matrix. |
 | Migration data loss | User state lost | Host exporter, backups, verify-before-switch. |
-| Security issue | Malicious file/firmware | Signed manifests, validation, read-only USB, plugin sandbox. |
+| Security issue | Malicious file/firmware | Signed manifests, validation, read-only USB, app/game sandbox. |
 | Legal/licensing | Distribution issue | GPL compliance, attribution, trademark review. |
 | Scope creep | Never ships | First-party feature list, no plugin tree, phased roadmap. |
+| Battery target not reproducible | Broken product claim | Fixed measurement protocol, baseline build, publish results or withdraw the claim. |
+| Skin compatibility scope creep | UI rewrite by another name | Documented subset, corpus report, hard memory/frame caps. |
+| App/game sandbox escape | Data loss or hardware damage | Capability API, quotas, adversarial tests, no raw hardware. |
+| Desktop app data loss | Library corruption | Backup, dry run, conflict policy, checksums, atomic writes. |
+| On-device database corruption | Missing or wrong library | Staging generation, checkpoint/resume, host parity test, old DB retained. |
+| Anti-corruption false positives or SD wear | User distrust, card wear | Tuned hashes, rate-limited charging-only scrub, manual override. |
+| Multi-device port regression | Broken target | Per-target matrix, shared-core tests, no support claim without a device run. |
+| Adapter compatibility regression | Corruption or boot failure | Compatibility table, conservative fallback, matrix testing. |
 
-The two new high-severity rows are the honest cost of native writes: a B-tree
-bug and a journal bug are both data-loss bugs. The donor overlay could fail
+The high-severity rows around B-tree mutation and journal replay are the honest
+cost of native writes: both are data-loss bugs. The donor overlay could fail
 without touching the music library. Helikon-OS cannot.
 
 ---
@@ -1102,14 +1150,14 @@ product unless a later, measured design explicitly reverses it.
 10. **v1/v2/v3 overlay formats in the new core.** A host exporter only.
 11. **The legacy tagcache/dircache stack.** New immutable database.
 12. **The full `apps/plugins/` tree and raw-hardware plugin API.**
-13. **The full Rockbox WPS/theme surface and 133 theme assets.** One new theme
-    format, a small default set.
+13. **The full Rockbox WPS engine and 133 bundled themes.** A documented
+    compatibility subset is allowed; the full engine and bundled assets are not.
 14. **Unsigned firmware or plugin execution.**
 15. **Periodic early-boot power callbacks and implicit sleep.**
 16. **Cached PMU/backlight state without invalidation.**
 17. **Unmeasured overclocking, undervolting or charging changes.**
 18. **Battery/power claims without a recorded measurement.**
-19. **APFS/HFSX, Apple proprietary blobs, or a FAT32-primary design.**
+19. **APFS/HFSX, a FAT filesystem mount, or a FAT32-primary design.**
 20. **The entire Rockbox application layer copied “because it works.”**
 
 21. **Writing to a volume that `fsck_hfs` reports dirty or damaged.** The
@@ -1159,20 +1207,24 @@ fixture corpus as the donor C validator.
 | Phase | Deliverable | Exit criteria |
 |---|---|---|
 | 0 | Rescue bootloader + native HFS+ read-only firmware skeleton | Boots, loads a verified image, Apple path intact, recovery menu, zero writes. |
-| 1 | Read-only player: HAL, HFS+, audio, UI, database | Plays music, browses the library, survives reboot, volume hash unchanged. |
-| 2 | Native HFS+ write prototype, non-journaled disposable volume | Create/write/rename/delete/mkdir/truncate; `fsck_hfs` clean; macOS mounts. |
+| 1 | Read-only player: HAL, HFS+, audio, minimal UI | Plays music, browses the library, survives reboot, volume hash unchanged. |
+| 2 | Native HFS+ write prototype, non-journaled disposable volume | Create/write/rename/delete/mkdir/truncate; `fsck_hfs` zero repairs; macOS mounts. |
 | 3 | Journaled HFS+ write engine | Journal append/replay; power-cut matrix; `fsck_hfs` reports no repairs. |
 | 4 | Metadata parity and user state | Timestamps, BSD/Finder info, settings, playlists, resume state; all transactional. |
-| 5 | Migration + host tools | Donor overlay exported to native files; hashes match; macOS verifies volume. |
-| 6 | USB read-only + diagnostics + update flow | macOS mounts read-only; logs export; update verified and rollback works. |
-| 7 | First-party features (PictureFlow, album art) | Feature parity with the product spec, not Rockbox. |
-| 8 | Optional plugin sandbox | Capability model, quotas, crash isolation. |
-| 9 | Power/thermal/battery tuning | Measured matrix; no unmeasured defaults. |
+| 5 | Anti-corruption foundations | Checksum index, verify-on-open for critical files, background scrub, quarantine path. |
+| 6 | Migration + host tools + Mac desktop app MVP | Donor overlay exported to native files; hashes match; app can back up, install and verify. |
+| 7 | Database: host builder + on-device incremental builder | 10k tracks; host/device parity; power-cut resume; playback unaffected. |
+| 8 | UI goals: album/artist, skin subset, podcast, car Tier 1 | Rich local pages; 20-skin corpus; 500-episode podcast library; receiver matrix. |
+| 9 | USB read-only + updates + installer + desktop app v1 | Read-only LUN; signed update/rollback; non-coder install; tag/rate/scrobble tasks. |
+| 10 | Apps/games sandbox | Runtime, SDK, quotas, signature/trust, crash isolation, adversarial tests. |
+| 11 | Battery, RAM, performance and thermal hardening | Measured battery/RAM/I/O matrix; no unmeasured defaults. |
+| 12 | Multi-device ports + release train/community | 7G and documented ports pass their matrix; public CI, docs, signed releases. |
 
 Phase 2 is a prototype on a volume you can throw away. Phase 3 is the first
 phase that may touch a real library, and only after the power-cut matrix passes.
 Phases 2–4 are the critical path; UI and feature work must not consume the
-testing time they need.
+testing time they need. Goal phases 5–12 are sequenced behind the writer and
+cannot begin device work before phase 3 passes.
 
 ---
 
@@ -1200,9 +1252,19 @@ Device:
   database/artwork install;
 - after every cut: boot, mount, `fsck_hfs -n`, and a metadata comparison;
 - journal replay from a copied disk image before and after mount;
-- audio matrix, click wheel, charging, lineout;
+- audio matrix, click wheel, charging, lineout, DAC measurements;
 - DFU install/uninstall and recovery;
-- update/rollback and migration.
+- update/rollback and migration;
+- battery runtime and sleep drain against a recorded Rockbox baseline;
+- RAM watermark on a 10k-track library;
+- adapter matrix: HDD, iFlash SD, iFlash CF, SSD;
+- 20-skin compatibility corpus and frame-budget trace;
+- 10k-track on-device database build with power cuts at 25/50/75%;
+- injected data corruption and scrub/quarantine reports;
+- app/game sandbox adversarial tests and crash isolation;
+- desktop-app task matrix: backup, tag, rate, scrobble, install;
+- car/receiver ignition and resume matrix;
+- per-target 7G/port matrix before any support claim.
 
 Release gate:
 
@@ -1210,7 +1272,8 @@ Release gate:
 - a single catalog or bitmap inconsistency blocks the release;
 - no stable release without a recorded device run;
 - no “host tests passed” claim presented as hardware validation;
-- no unexecuted stress gate hidden in the notes.
+- no unexecuted stress gate hidden in the notes;
+- no goal in §28.6 is marked met without its recorded evidence.
 
 The donor project’s unexecuted P0 power-loss, native-integrity and 100-cycle
 gates are prerequisites for the first Helikon-OS write release, not optional
@@ -1234,12 +1297,26 @@ polish.
    64 MiB budget the writer may take before audio and UI suffer.
 6. **Unicode policy:** exact bytes vs canonical equivalence; normalization
    table size; how to match macOS case folding exactly.
-7. **Database location:** host-built only vs optional on-device build.
-8. **Plugin model:** none, capability API, or bytecode sandbox.
-9. **FAT fallback:** read-only recovery only, or full read/write fallback.
-10. **Theme format:** minimal declarative format vs retained-mode layouts.
-11. **Update transport:** USB read-only + macOS staging vs DFU-only.
-12. **Product identity:** Helikon-OS is chosen; see Appendix D for the naming
+7. **Database location:** host-built first vs on-device incremental builder;
+   the paper recommends host first, on-device in v1.x (§28.4.1).
+8. **App/game runtime:** WebAssembly interpreter vs a small bytecode VM; SDK
+   language and signing model.
+9. **Desktop app transport:** macOS Disk Mode vs a Helikon-OS USB service mode
+   for Windows/Linux. The service mode is the cross-platform path but expands
+   the USB stack.
+10. **Skin compatibility scope:** which WPS tags and theme features are in the
+    documented subset; how to report unsupported skins.
+11. **Anti-corruption scope:** checksum algorithm, which files are covered, scrub
+    cadence and whether the user can disable it.
+12. **Battery target:** the exact baseline and percentage goal, plus the
+    measurement rig; withdraw the claim if the data does not support it.
+13. **7G and port scope:** board audit, panel/PMU/audio differences, and which
+    other iPods are realistic.
+14. **Car protocol:** legal and technical scope of the 30-pin accessory subset;
+    Tier 1 line-out/charging must not depend on it.
+15. **Theme format:** minimal declarative format vs retained-mode layouts.
+16. **Update transport:** USB read-only + macOS staging vs DFU-only.
+17. **Product identity:** Helikon-OS is chosen; see Appendix D for the naming
     rule and clearance checklist.
 
 Decision 3 and 4 are the ones that determine whether Helikon-OS is a real
@@ -1284,7 +1361,7 @@ Never mix the two on the same device without a backup and a recovery plan.
   project pins).
 - Python 3, `make`, `git`, `gh` and a text editor.
 - A **test iPod Classic 6G** that you can afford to recover, not your only
-  device.
+  device; a 7G only after its port exists.
 - A known-good Apple firmware/DFU recovery path.
 - A verified backup of the music library and `/.rockpod-rw`.
 - An iFlash SD/CF, SSD or original HDD, recorded by model.
@@ -1490,6 +1567,33 @@ No stable release before this stage.
 - A release that hides unexecuted stress gates.
 - A plugin or theme bundle from an untrusted source.
 
+### 26.12 What you can verify for the product goals
+
+You do not need to read C to check most of the README goals. The evidence is
+observable:
+
+| Goal | What you can check | Evidence to record |
+|---|---|---|
+| Battery | Playback hours and sleep drain against a Rockbox baseline. | Same album, volume, backlight and output; three runs. |
+| RAM | The status screen’s peak/used memory on a 10k-track library. | Watermark after browse, play and database build. |
+| Clean UI/graphics | Complete the same five tasks without instructions. | Task list, time, dead ends, screenshots. |
+| Rockbox skins | Install corpus skins and compare with Rockbox. | Load/render report and frame drops. |
+| Adapters | Boot, play, write and sleep on each adapter. | Model, card, firmware and result. |
+| Database | Start a build, cut power at 25/50/75%, resume. | Track count matches the host builder. |
+| Anti-corruption | Scrub a test volume with an injected bad file. | Detected, quarantined, not silently “fixed.” |
+| Updates | Install, reboot, roll back, reject a bad image. | Version/hash before and after. |
+| Installation | Follow the app/checklist on a clean device. | Time, surprises, recovery path. |
+| DAC/audio | Line-out recording and listening test. | No clicks, correct rate, measured noise. |
+| Read/write speed | Copy 1 GiB and 1,000 small files. | Time and firmware hash. |
+| Podcasts | 500 episodes, resume, speed, chapter, sync. | Played state round-trip. |
+| Desktop app | Tag, rate, scrobble, install, back up. | Task matrix on macOS first. |
+| Album/artist | Open and scroll a 10k library. | Open latency and frame rate. |
+| Car/receiver | Ignition on/off 100 times, resume and charge. | Receiver model and result. |
+| Games/apps | Install a demo, crash it, try to read a private file. | Isolated, logged, denied. |
+| 7G/ports | Run the per-target matrix. | Boot, play, charge, sleep, write. |
+
+A goal marked “done” without a row here is a claim, not evidence.
+
 ## 27. Assembly order and handoff checklist
 
 This is the order in which the modules should be brought up. Each step has a
@@ -1509,11 +1613,814 @@ proof that does not require reading the code.
 | 10 | Database and browsing | new | 10k tracks, search, album art, playlists. |
 | 11 | USB read-only and logs | donor concepts | macOS mounts read-only, logs export, no host writes. |
 | 12 | Update and migration | new | Signed image, rollback, donor overlay export with matching hashes. |
-| 13 | Hardening | all | Adapter matrix, power-loss matrix, 100-cycle resume, battery gate. |
+| 13 | Anti-corruption | new | Checksum index, verify-on-open, scrub and quarantine on a corrupted test volume. |
+| 14 | On-device database builder | new | 10k tracks; power-cut resume; host/device parity; playback unaffected. |
+| 15 | Skin compatibility | new + donor WPS corpus | 20 skins render; unsupported tags reported; frame/memory caps hold. |
+| 16 | Album/artist, podcast and car UI | new | Rich local pages; 500 episodes; receiver matrix and ignition resume. |
+| 17 | Desktop app and installer | new host product | macOS task matrix; backup, tag, rate, scrobble, install, update. |
+| 18 | App/game sandbox | new | Runtime, SDK, quotas, signature, crash isolation and escape tests. |
+| 19 | Multi-device port | new BSP + shared core | 7G and documented ports pass boot/play/charge/sleep/write. |
+| 20 | Hardening | all | Adapter matrix, power-loss matrix, 100-cycle resume, battery gate. |
 
 **Handoff package for each step:** interface document, test fixture, expected
 error codes, known limitations, and a rollback method. A module without a
 rollback method is not ready.
+
+## 28. Product goals and engineering commitments
+
+The Helikon-OS repository README lists the product goals in plain language. This
+section transcribes those goals and works each one into an engineering
+commitment: what it means, what has to be built, what would count as evidence,
+which release it belongs to, and where it conflicts with another goal. The
+README is the source of the goals; this paper is the design response.
+
+The goals are deliberately ambitious. Some are v1 requirements, some are v1.x
+work, and some are exploratory. A goal is not met because a screen exists or a
+demo boots. It is met when the acceptance evidence in §28.6 is recorded on a
+device.
+
+For traceability, the README list is reproduced here as written:
+
+- Improved Battery Life over Rockbox
+- Cleaner interfaces
+- The ability to use Rockbox skins on Helikon-OS
+- Improved RAM Usage
+- Cleaner Graphics
+- Improved support for iFlash/other adapters
+- Improved database building on iPods
+- Keeping this opensource and community-friendly
+- Regular firmware/bootloader updates
+- Clearer installation procedures
+- Make everything easier to use
+- HFS+ native without an overlay or FAT support
+- Active anti-corruption protection for files
+- Keeping the code lightweight (wherever possible)
+- (Custom) game support
+- Improved DAC support
+- Improved read/write speeds (if possible)
+- (Custom) Application support
+- Improved podcast support
+- A desktop app for: file tagging, album descriptions/ratings, last.fm scrobbling, easy install, improved read/write capabilities, app/game/skins installations etc.
+- Improved album view (taking inspiration from Roonserver)
+- Improved artist view (taking inspiration from Roonserver)
+- Improved car/receiver playback
+- Support a wide range of iPod devices and maybe other MP3 players
+- A modern feasible alternative to Rockbox/Rockpod or others.
+
+Source: the Helikon-OS repository README. It was read for this paper and not
+modified.
+
+### 28.1 Goal map
+
+| # | README goal | Engineering interpretation | Priority | Target | Evidence |
+|---:|---|---|---|---|---|
+| 1 | Improved battery life over Rockbox | Lower average power for playback, idle and sleep on the same hardware and media. | P0 | v1 hardening | Measured hours and sleep drain against a Rockbox baseline. |
+| 2 | Cleaner interfaces | Consistent navigation, typography, focus, spacing and error recovery. | P0 | v1 | Task-based usability test; no dead ends. |
+| 3 | Rockbox skins on Helikon-OS | Load a documented subset of Rockbox WPS/themes through a compatibility layer. | P1 | v1.x | Compatibility corpus and frame-budget results. |
+| 4 | Improved RAM usage | Hard memory budgets; no full-library RAM copy; bounded caches. | P0 | v1 | Peak watermark on a 10k-track library. |
+| 5 | Cleaner graphics | Crisp text, correct scaling, smooth but bounded transitions. | P0 | v1 | Frame-time budget and visual review. |
+| 6 | Improved iFlash/adapter support | Detect and survive SD/CF/SSD/HDD bridge quirks and power states. | P0 | v1 | Adapter compatibility matrix. |
+| 7 | Improved database building on iPods | Resumable, incremental, low-RAM on-device builder. | P1 | v1.x | 10k tracks, power-cut resume, host parity. |
+| 8 | Open source and community-friendly | GPL-compatible licensing, governance, CI, docs, public roadmap. | P0 | continuous | Public repository, releases, contribution guide. |
+| 9 | Regular firmware/bootloader updates | Signed release train with rollback and clear channels. | P0 | v1 | Update/rollback/power-cut tests. |
+| 10 | Clearer installation | Guided installer, backup, model checks, recovery instructions. | P0 | v1 | Non-coder completes install and recovery. |
+| 11 | Make everything easier to use | Safe defaults, fewer modes, explicit status, no hidden failure. | P0 | v1 | Task completion and error-recovery test. |
+| 12 | HFS+ native without overlay or FAT | Native writable HFS+ only; no `/.rockpod-rw`, no FAT mount. | P0 | v1 | `fsck_hfs` clean; no FAT symbols; `NOT_HFS` path. |
+| 13 | Active anti-corruption | Journaled metadata plus data checksums and background scrub. | P0 | v1/v1.x | Injected-corruption detection and quarantine. |
+| 14 | Lightweight code | Size and RAM budgets; no legacy application tree. | P0 | continuous | Map/size/RAM reports. |
+| 15 | Custom game support | Sandboxed game runtime with a small SDK. | P2 | v2 | Playable demo; escape tests. |
+| 16 | Improved DAC support | Correct internal codec path, rates, line-out and measurements. | P1 | v1.x | Loopback/audio measurements. |
+| 17 | Improved read/write speeds | Batched, aligned I/O with journal-aware commit. | P1 | v1.x | Sequential/random benchmarks. |
+| 18 | Custom application support | Sandboxed app runtime with permissions and packaging. | P2 | v2 | App demos; permission tests. |
+| 19 | Improved podcast support | Host-fetched feeds; chapters, resume, speed, sync. | P1 | v1.x | 500-episode library test. |
+| 20 | Desktop app | Tagging, descriptions/ratings, scrobbling, install, file transfer. | P1 | v1.x | Task matrix on macOS first. |
+| 21 | Improved album view | Rich local album pages in the spirit of Roonserver. | P1 | v1.x | 10k-album browse and open latency. |
+| 22 | Improved artist view | Rich local artist pages in the spirit of Roonserver. | P1 | v1.x | 10k-artist browse and open latency. |
+| 23 | Improved car/receiver playback | Line-out, charging, resume and a control-protocol subset. | P1 | v1.x | Receiver/ignition matrix. |
+| 24 | Wide iPod and player support | 7G next, then other documented targets; other players exploratory. | P2 | v2 | Per-target boot/playback/charge matrix. |
+| 25 | Modern feasible alternative | A coherent, documented, maintained product rather than a fork. | P0 | continuous | Release audit against this paper. |
+
+Priority means: **P0** is required before the first stable release; **P1** is the
+first follow-up line; **P2** is later and must not delay P0. The roadmap in §23
+is the schedule; this table is the product contract.
+
+### 28.2 Platform and storage goals
+
+#### 28.2.1 HFS+ native without an overlay or FAT
+
+This is the defining goal. It means:
+
+- the data partition is mounted as native HFS+ and written through the
+  transaction engine;
+- there is no `/.rockpod-rw`, no shadow namespace and no hidden container;
+- there is no FAT filesystem driver in the firmware;
+- a non-HFS+ volume is reported as `NOT_HFS` and is not mounted;
+- the bootloader reads HFS+ only and never writes it;
+- the installer/desktop app checks the filesystem before install and refuses to
+  continue on a FAT32 iPod until the user converts it with a verified backup.
+
+Removing FAT is a product decision with consequences. A FAT32 iPod cannot be
+installed or read by Helikon-OS. The donor project’s FAT fallback exists because
+Rockpod also serves FAT32 devices; Helikon-OS deliberately does not. The
+partition scanner still understands APM, MBR, GPT and raw layouts because it
+must find the HFS+ partition, but the filesystem layer has one implementation.
+
+Acceptance:
+
+- the firmware contains no FAT mount path and no FAT write path;
+- a FAT32 volume produces a clear `NOT_HFS` screen, not a crash or a mount
+  attempt;
+- a journaled HFS+ volume mounts, writes and survives `fsck_hfs`;
+- macOS mounts the same volume after a device write session.
+
+#### 28.2.2 Active anti-corruption protection
+
+HFS+ protects metadata with a journal; it does not checksum file data. “Active
+anti-corruption” therefore needs two layers:
+
+**Metadata integrity**
+
+- journaled transactions for every catalog, bitmap, extents and volume-header
+  change;
+- mount-time validation of the volume header, alternate header, B-tree nodes,
+  bitmap and extents;
+- `fsck_hfs` compatibility as a release gate;
+- read-only mount on any inconsistency, with the exact error;
+- no auto-repair and no metadata zeroing.
+
+**Data integrity**
+
+- a sidecar checksum index under `/.helikon/checksums`, keyed by CNID and path,
+  storing a strong hash (SHA-256 or BLAKE3) plus size and modification time;
+- checksums computed on first import, on device write close, and on desktop-app
+  transfer;
+- a background scrub that reads files when the device is charging and idle,
+  verifies the hash, and records `OK`, `MISMATCH` or `UNREADABLE`;
+- verification-on-open for critical files: settings, database, playlists,
+  firmware images and the checksum index itself;
+- quarantine: a mismatched file is never silently rewritten or deleted; it is
+  marked, reported and left in place for host recovery;
+- repair only from a known-good copy: the desktop app compares against its
+  backup, or the user restores from a backup. There is no self-healing claim.
+
+The checksum index is itself a native file written through the transaction
+engine, with two generations and a checksum. A corrupt index is rebuilt by
+reading the files, not trusted blindly.
+
+Acceptance:
+
+- injected single-bit and block-level corruption in test images is detected at
+  the expected rate, with no false “OK”;
+- a scrub of 10,000 files completes on charge without exhausting the SD card or
+  delaying playback;
+- a corrupted settings file falls back to the previous generation and reports
+  the failure;
+- `fsck_hfs` remains clean after every scrub and repair rehearsal.
+
+Anti-corruption is not a substitute for backups. It detects and reports; it does
+not create redundancy.
+
+#### 28.2.3 Improved read/write speeds
+
+The speed goal is about the whole path, not a benchmark number:
+
+- 64–256 KiB block I/O with 4 KiB alignment;
+- DMA where the ATA bridge supports it, PIO fallback with correct timing;
+- read-ahead for playback and database scans;
+- bounded write-behind for file data, flushed at transaction commit;
+- group commit for metadata-heavy operations such as tag edits or many small
+  files;
+- no `fsync` per file when a batch can share one barrier;
+- journal overhead measured separately from raw device throughput;
+- USB read speed measured on the read-only LUN, with no claim that it equals
+  disk-mode speed.
+
+The target is not “faster than every adapter.” It is: reads are not slower than
+the donor on the same hardware, writes are bounded by the raw device plus a
+measured journal cost, and the device remains responsive during background
+database or scrub work.
+
+Acceptance:
+
+- sequential read/write, 4 KiB random read/write, 1,000-file create/delete, and
+  a 1 GiB copy are benchmarked on HDD, iFlash SD, iFlash CF and SSD;
+- the results are published with the test method and firmware hash;
+- no benchmark is run on a volume containing the only copy of the data.
+
+#### 28.2.4 Improved iFlash and adapter support
+
+iFlash adapters are ATA bridges in front of SD or CF cards. They are not all
+equivalent. The firmware must handle:
+
+- identify/model/firmware strings and capacity reporting;
+- 512-byte and 4096-byte logical/physical sector combinations;
+- PIO and DMA timing differences;
+- write-cache behavior and flush errors;
+- cards that stall, return short transfers or need retries;
+- power-up and sleep timing differences;
+- SD card wear and performance variability.
+
+Design:
+
+- an adapter compatibility table keyed by identify data, with conservative
+  defaults for unknown devices;
+- explicit timeout, retry and error taxonomy;
+- a “slow but safe” PIO fallback when DMA is unreliable;
+- a boot-time storage report with model, firmware, sector sizes and negotiated
+  mode;
+- no adapter-specific hacks in the filesystem layer; quirks belong in the block
+  device;
+- a device matrix that records the exact adapter, card and firmware.
+
+Acceptance:
+
+- boot, playback, write, sleep/wake and 100-cycle resume on at least one SD, one
+  CF, one SSD and one HDD configuration;
+- no data corruption after surprise removal or power loss in a disposable test;
+- a known-bad card is reported, not silently used.
+
+#### 28.2.5 Regular firmware and bootloader updates
+
+“Regular updates” means a release train, not an occasional ZIP:
+
+- stable, beta and development channels;
+- signed manifests with board, version, size, load address and hashes;
+- firmware staged as native files, verified before boot;
+- bootloader changes only through DFU with their own verification;
+- rollback to the previous known-good image;
+- schema migrations for database, settings and checksum index;
+- changelogs that state whether the update is firmware-only, bootloader-only or
+  both;
+- a published support window and a security-response process.
+
+Cadence is a project decision, but the mechanism must support a monthly or
+quarterly release without a new installer design. A release is not “regular” if
+it requires a manual file copy and a guess about which image is current.
+
+Acceptance:
+
+- update from the previous stable, from beta to stable, and rollback;
+- corrupted image, wrong board, wrong version and truncated file are rejected;
+- a power cut during staging leaves the old image bootable;
+- the bootloader and firmware report their versions and hashes on screen.
+
+#### 28.2.6 Keeping the code lightweight
+
+Lightweight is both a code-size and a RAM goal. The rules:
+
+- every module has a size budget in the build; a PR that exceeds it must
+  justify the change or shrink something else;
+- the bootloader must fit `MOVE_AREA` with measured headroom, not “it links”;
+- no C++ exceptions, RTTI or large runtime dependencies in the firmware;
+- one implementation of endian, bounds and checksum helpers, not a copy per
+  module;
+- compile-time feature flags for skins, apps/games, podcast, car and the USB
+  service mode; a build without them does not carry their code;
+- no legacy application tree, no duplicate filesystem, no second write path;
+- files over 1,000 lines need a decomposition plan, following the donor’s own
+  rule;
+- optional assets (themes, fonts, artwork) are installed, not compiled in;
+- release builds publish `size`, map-file and RAM reports.
+
+Acceptance:
+
+- the firmware and bootloader size reports are part of every release;
+- no module grows without a recorded reason;
+- a minimal build (no skins, no apps, no podcast, no car, no service mode) is
+  smaller and uses less RAM than the full build;
+- the full build still fits the device and the §28.3.2 memory budget.
+
+### 28.3 Experience goals
+
+#### 28.3.1 Improved battery life over Rockbox
+
+Battery life is a system property: CPU frequency, display, backlight, audio
+codec, ATA spin-down, SD card behavior, RAM refresh and sleep policy all matter.
+The design levers are:
+
+- explicit power states (`ACTIVE`, `IDLE`, `STORAGE_GATED`, `STORAGE_DEEP`,
+  `SYSTEM_SLEEP`, `OFF`) with measured transition costs;
+- lower CPU frequency for UI and playback when decoding headroom allows;
+- backlight PWM and automatic dimming, with a user-visible timeout;
+- large enough audio buffers to let the disk sleep during playback;
+- batch database and artwork work so the disk wakes less often;
+- no periodic early-boot callbacks and no polling loops;
+- retained-mode UI that redraws only damaged regions;
+- sleep that preserves RAM and resumes quickly, with a tested wake source;
+- charge-aware behavior: defer scrub and database work to charging.
+
+The claim must be comparative and measured:
+
+- same iPod model, same card/SSD, same album, same volume, same backlight, same
+  output (headphone or line-out);
+- at least three runs per configuration, reporting mean and range;
+- playback runtime, idle runtime, sleep drain per day and boot energy;
+- Rockbox baseline built from a recorded commit and hash;
+- a target such as “at least 10% longer playback than the baseline” is a goal,
+  not a marketing promise, and is removed if the measurement does not support
+  it.
+
+Risks: an iFlash SD can consume more power than a hard drive in some states; a
+larger audio buffer can increase RAM pressure; aggressive disk sleep can cause
+wake latency or clicks. Each tradeoff is measured.
+
+#### 28.3.2 Improved RAM usage
+
+64 MiB is the hard budget. The design targets:
+
+| Area | Budget | Notes |
+|---|---:|---|
+| Kernel, HAL, block, HFS+ read | 3–5 MiB | Code, stacks, bounded node/name caches. |
+| HFS+ write engine and journal | 2–4 MiB | One transaction’s dirty set, log buffer. |
+| Audio buffers and codecs | 16–24 MiB | Sized for disk sleep and gapless; measured. |
+| Database mapped pages | 4–8 MiB | Read-only mapping, not a full copy. |
+| UI, fonts, artwork | 3–5 MiB | One screen, one theme, bounded image cache. |
+| App/game sandbox (optional) | 4–8 MiB | Quota, not reserved when unused. |
+| Diagnostics and recovery | 2–3 MiB | RAM ring, crash dump. |
+| Reserve | 4 MiB | Fragmentation and emergency allocation. |
+
+Techniques:
+
+- static allocation for core structures; no unbounded `core_alloc`;
+- one B-tree node cache and one name cache, both with high/low watermarks;
+- streaming tag reads, not a whole-library metadata copy;
+- memory-mapped database pages with a bounded page cache;
+- shared font and icon atlases;
+- zero-copy audio where the codec permits it;
+- a memory watermark and fragmentation test in CI and on device.
+
+Acceptance:
+
+- peak usage stays below the budget on a 10,000-track library with album art;
+- 72-hour playback, browse, database and scrub soak without an out-of-memory
+  failure;
+- allocation failure returns a specific error and a safe screen, not a crash;
+- the app/game sandbox cannot starve playback.
+
+#### 28.3.3 Cleaner interfaces and cleaner graphics
+
+“Cleaner” is not a skin. It is a small set of rules:
+
+- one navigation model: home → list → detail → action, with a predictable back
+  stack;
+- one focus model for the click wheel, with acceleration and no lost focus;
+- typography with one UI font, clear hierarchy, minimum sizes and no clipped
+  text;
+- consistent spacing, separators and status areas;
+- explicit empty, loading, error and read-only states;
+- no hidden modes and no “hold this button while booting” for normal tasks;
+- accessibility: high contrast, large text option, readable error codes.
+
+Graphics:
+
+- RGB565 framebuffer, 320×240, double-buffered where RAM allows;
+- integer scaling and dithering for cover art, not nearest-neighbour stretching;
+- anti-aliased fonts and icons with precomputed masks;
+- partial invalidation and retained-mode scenes; no full-screen redraw per
+  frame;
+- transitions capped by a frame budget, with a “reduce motion” setting;
+- no GPU assumptions; all rendering is CPU blitting with measured cost.
+
+Acceptance:
+
+- a 30 fps list scroll and a 200 ms screen-open budget on the reference device;
+- no tearing, clipped text or unreadable contrast in the default theme;
+- a usability test with a non-coder completes play, browse, settings, podcast
+  and install tasks without instructions.
+
+#### 28.3.4 Rockbox skin compatibility
+
+The goal is “the ability to use Rockbox skins,” not “reimplement every Rockbox
+skin feature.” A full WPS engine is 80,000+ lines of assets and a large tag
+language; copying it would defeat the lightweight goal. The design is a
+compatibility layer with a documented subset:
+
+- parse WPS text into viewports, static text, images, fonts, progress bars,
+  conditionals and the common metadata tags;
+- map tags to Helikon-OS playback, library and system values;
+- support album art, title/artist/album, time, progress, volume, battery,
+  shuffle/repeat and status icons;
+- render unsupported tags as a visible placeholder and log the tag name; never
+  crash, never silently drop the whole skin;
+- support a theme package: `.wps`, assets, fonts and a config subset;
+- validate size, image dimensions, font references and tag nesting before
+  activation;
+- cap parsed nodes, image cache and per-frame work; a pathological skin is
+  rejected with a reason.
+
+Compatibility is measured, not asserted:
+
+- a corpus of popular, freely redistributable skins is rendered on the device
+  and compared with Rockbox screenshots;
+- the compatibility report lists supported tags, unsupported tags and visual
+  differences;
+- the target is a documented subset covering the common tags used by the corpus,
+  not 100% of the language;
+- themes are installed by the user or the desktop app; the project does not
+  redistribute themes without permission.
+
+Acceptance:
+
+- at least 20 corpus skins load, render and survive track changes, pause,
+  charging and sleep;
+- no skin can exceed the frame or memory budget;
+- malformed and hostile skin files are rejected without a crash;
+- the default Helikon-OS UI remains available if a skin fails.
+
+This is P1, not P0. A v1 device with a clean first-party UI is more important
+than a half-working skin engine.
+
+#### 28.3.5 Improved album and artist views
+
+The reference is the rich, browseable presentation associated with Roonserver:
+an album or artist is a page, not a filename row. On a 320×240 device with no
+network, the data must be local:
+
+- album page: cover, title, artist, year, genre, rating, description, disc and
+  track list, credits, play/shuffle;
+- artist page: image, biography, albums, top tracks, related artists and
+  appearances;
+- data sources: embedded tags, local artwork, and optional sidecar JSON written
+  by the desktop app (descriptions, ratings, credits, biographies supplied by
+  the user);
+- no scraping, no network calls and no bundled proprietary biographies;
+- search and filters by genre, year, rating and added date;
+- virtualized lists and cached text layout so a 10,000-album library remains
+  responsive.
+
+Acceptance:
+
+- open an album or artist page in under 200 ms on the reference device;
+- scroll a 10,000-item list at the frame budget;
+- pages render correctly with missing art, missing biography and missing
+  ratings;
+- no network dependency and no hidden metadata upload.
+
+#### 28.3.6 Improved podcast support
+
+The device has no network, so podcast support is split:
+
+**Desktop app**
+
+- subscribe to RSS/Atom feeds;
+- download episodes;
+- read show notes, chapters and artwork;
+- choose what to sync and how much space to use;
+- mark episodes played/unplayed and sync state back.
+
+**Device**
+
+- show and episode lists, newest first, with played/unplayed state;
+- resume position per episode;
+- playback speed (0.5×–2×) with pitch correction where feasible;
+- skip forward/back (15/30/60 s), chapter navigation where the file provides
+  it;
+- sleep timer and “mark played” action;
+- episode descriptions and show notes in a scrollable page;
+- no feed fetching and no network stack on the device.
+
+Acceptance:
+
+- a 500-episode library browses and resumes correctly;
+- a power cut preserves the resume point;
+- speed and skip settings persist per episode/show;
+- desktop sync round-trips played state without duplicates.
+
+#### 28.3.7 Improved car and receiver playback
+
+Car use is mostly line-out, charging and a few controls. The design has two
+tiers:
+
+**Tier 1 — line-out and power**
+
+- detect dock/line-out and switch audio routing;
+- fixed line-out level with a safe-volume limit;
+- charge while playing;
+- resume the last track and position after ignition;
+- graceful shutdown on power loss, with no pops or clicks;
+- remember shuffle/repeat and source.
+
+**Tier 2 — accessory control**
+
+- a subset of the 30-pin accessory protocol for play/pause, next/previous,
+  volume and metadata display, where the receiver supports it;
+- protocol reverse engineering and certification risk is explicit; no Apple
+  certification claim;
+- unknown accessories fall back to line-out and charging, never a hang.
+
+Acceptance:
+
+- a receiver matrix records model, cable, charging, resume, controls and audio
+  quality;
+- ignition on/off 100 cycles without corruption or a stuck screen;
+- no pop on connect/disconnect and no unexpected volume jump;
+- Tier 2 is optional and does not block v1.
+
+#### 28.3.8 Improved DAC and audio support
+
+On the iPod Classic 6G the audio path is the internal CS42L55 codec and the
+line-out/headphone amplifiers. “Improved DAC support” means using that path
+correctly, not adding an external USB DAC: the 6G has no USB host port.
+
+Work items:
+
+- verify the codec’s supported sample rates and word lengths on the actual
+  board; do not assume 96 kHz works because the datasheet mentions it;
+- play 44.1/48/88.2/96 kHz files at their native rate where the path supports
+  it, or resample with a documented, measured filter;
+- correct clocking, de-emphasis, filter and gain settings;
+- gapless playback and accurate seek;
+- line-out mode with fixed gain and a safe headphone limit;
+- ReplayGain, EQ, crossfeed and balance without clipping;
+- measure noise floor, THD+N, frequency response and channel separation through
+  line-out on a test rig;
+- no “audiophile” claim without measurements.
+
+External DACs over USB are out of scope for the 6G. A future target with USB host
+could revisit this; it is not a v1 promise.
+
+#### 28.3.9 Custom game support
+
+Games are a P2 feature built on the same sandbox as applications:
+
+- a WebAssembly interpreter (no JIT) or a small bytecode VM as the runtime;
+- host APIs for framebuffer, input, audio, timers and save data;
+- no raw block, NOR, PMU or GPIO access;
+- a game package with manifest, signature, assets and code;
+- memory quota (for example 4–8 MiB), CPU time slice and audio channel limit;
+- crash isolation: a trap or watchdog returns to the home screen, not a kernel
+  panic;
+- an SDK with examples, a host simulator and documentation;
+- installation through the desktop app, not a random file on the volume.
+
+Rockbox plugins and games are not binary-compatible. “Custom game support” means
+games built for the Helikon-OS runtime.
+
+Acceptance:
+
+- a simple game runs at a playable frame rate on the reference device;
+- a malicious test app cannot read raw storage, write the framebuffer outside
+  its quota or hang the system;
+- a crashing app returns to the home screen with a log;
+- the runtime is absent or disabled if the user does not install apps.
+
+#### 28.3.10 Custom application support
+
+Applications use the same runtime and permission model:
+
+- permissions: read library, write app-private storage, audio playback, display,
+  input, timed background work;
+- no permission for raw storage, firmware, PMU or network;
+- package signing and a trust screen at install;
+- app-private data under `/.helikon/apps/<id>/`, written through the
+  transaction engine;
+- uninstall removes app data only after confirmation;
+- a small first-party set (podcast browser, notes, calculator, reader) proves the
+  API before third-party apps.
+
+Acceptance:
+
+- install, launch, suspend, resume and uninstall an app;
+- permission denial produces a clear message, not a crash;
+- an app cannot read a file outside its granted roots;
+- an app update preserves or migrates its private data.
+
+### 28.4 Ecosystem goals
+
+#### 28.4.1 Improved database building on iPods
+
+The host builder remains the fastest and safest path. The on-device builder is
+for users without a Mac, or after large changes. It is incremental and
+resumable:
+
+- crawl the HFS+ catalog in chunks; do not load the whole tree;
+- read tags in a bounded buffer; skip unsupported files with a recorded reason;
+- append records to a staging database with a checkpoint every N files;
+- store a scan cursor (CNID/path and directory offset) so a power cut resumes;
+- run at low priority when playing; pause on low battery or high temperature;
+- build a new generation, validate counts and checksums, then atomically swap;
+- keep the old generation until the new one is verified;
+- prune deleted files by CNID; detect renamed files by content hash or
+  mtime/size;
+- never block playback for more than a measured slice.
+
+Acceptance:
+
+- 10,000 tracks build on device within a recorded time;
+- a power cut at 25%, 50% and 75% resumes and completes;
+- the on-device result matches the host builder’s track count and metadata for
+  a test corpus;
+- playback continues during a background build without dropouts;
+- a failed build leaves the previous database active.
+
+#### 28.4.2 Desktop app
+
+The desktop app is a first-class product, not a helper script. Its jobs:
+
+- device detection, health report and backup;
+- firmware, bootloader, app, game and skin installation;
+- music import and file transfer;
+- tag editing (ID3, MP4, FLAC, Vorbis);
+- album descriptions, ratings and credits;
+- playlist editing;
+- podcast subscription, download and sync;
+- Last.fm scrobbling from play history, opt-in;
+- database build and verification;
+- checksum/scrub reports and restore guidance.
+
+Platform strategy:
+
+- **macOS first**, because native HFS+ read/write is available in Disk Mode.
+- **Windows/Linux later.** Writing HFS+ from those hosts is not reliable
+  without a bundled driver. The preferred cross-platform path is a Helikon-OS
+  USB service mode: the device exposes a framed vendor protocol and performs
+  file operations through its own HFS+ engine. The host app does not need an
+  HFS+ driver. This is a file-operation protocol, not a writable mass-storage
+  LUN: it never exposes raw block writes and it uses the same VFS and
+  transaction engine as the device. This is a significant USB-stack project and
+  an open decision (§25).
+- A read-only fallback can use the mass-storage LUN for diagnostics and
+  backups, but not for writes.
+
+Data model:
+
+- a host SQLite database for library metadata, ratings, descriptions, podcast
+  state and scrobble queue;
+- a device database built from the same schema and validated on mount;
+- conflict resolution by modification time and content hash; never silently
+  overwrite a newer file;
+- all destructive actions require a backup and a confirmation.
+
+Last.fm:
+
+- scrobbling happens on the host, never on the device;
+- the user provides their own API credentials or uses the app’s registered
+  client;
+- the queue is offline-first and rate-limited;
+- no listening history leaves the machine without explicit consent.
+
+Acceptance:
+
+- import 10,000 tracks, edit tags, write ratings/descriptions, build the
+  database, install an app and scrobble a play;
+- a failed transfer leaves the device and host consistent;
+- Windows/Linux support is not claimed until the service-mode path is tested;
+- the app works with a device that has no network.
+
+#### 28.4.3 Clearer installation and ease of use
+
+The install flow should be a guided checklist, not a wiki page:
+
+1. detect the iPod model, capacity, storage adapter and filesystem;
+2. verify it is HFS+ and `fsck_hfs` clean; refuse FAT32 with an explanation;
+3. verify the Apple restore path and DFU entry;
+4. offer a full backup and verify it by reading a file back;
+5. download and verify the signed bootloader/firmware;
+6. install the bootloader without `--single`, preserving the Apple NOR path;
+7. install the firmware, reboot and run a first-boot self-test;
+8. show versions, hashes, storage report and recovery instructions;
+9. provide a one-click “restore Apple firmware” path.
+
+Ease of use also means:
+
+- one status screen for firmware, bootloader, database, checksums and storage;
+- no hidden “hold this button” sequences for normal operation;
+- clear errors with a next action;
+- settings that explain their effect;
+- a “safe mode” that boots read-only with diagnostics.
+
+Acceptance:
+
+- a non-coder completes install, first boot, playback and restore on a clean
+  device using only the app and the printed checklist;
+- a failed install leaves the device recoverable;
+- no step requires formatting the library or deleting the journal.
+
+#### 28.4.4 Open source and community-friendly
+
+The project must be open in license and process:
+
+- firmware and bootloader under a GPL-compatible license, with Rockbox
+  attribution and source offers;
+- host tools and SDK under a compatible license, with a clear contribution
+  policy;
+- documentation under a permissive documentation license;
+- public issue tracker, roadmap, RFC process and design notes;
+- code of conduct and security policy;
+- reproducible builds, signed releases and published hashes;
+- CI for host tests, sanitizers, fuzzers, size budgets and cross-links;
+- a device matrix maintained by owners and contributors;
+- translations and accessibility contributions treated as first-class;
+- no contributor assignment that strips user rights;
+- trademark rules that protect the name without closing the code.
+
+“Community-friendly” also means the project does not depend on one person’s
+laptop: release scripts, signing keys, test fixtures and documentation live in
+the repository or a governed vault.
+
+#### 28.4.5 Wider iPod and player support
+
+The 6G is the reference. The 7G is the next named target. Other iPods and other
+MP3 players are ports, not assumptions.
+
+Porting contract:
+
+- a board support package with clock, PMU, LCD, input, audio, storage and
+  power hooks;
+- a target description: SoC, RAM, panel, codec, storage, boot ROM/DFU, button
+  map and `MOVE_AREA`;
+- shared HFS+, VFS, UI and player code with no target `#ifdef` in the core;
+- a per-target test matrix: boot, playback, charge, sleep/wake, write, USB,
+  recovery;
+- a hardware donation/testing policy;
+- no claim of support without a recorded device run.
+
+Sequence:
+
+1. 6G, all v1 gates;
+2. 7G board audit and port;
+3. other S5L8702 iPods with documented hardware;
+4. other MP3 players only if a maintainer provides hardware, documentation and
+   a long-term test plan.
+
+The architecture should make a port possible, not pretend that every player is
+one configuration flag away.
+
+#### 28.4.6 A modern, feasible alternative
+
+Positioning against Rockbox/Rockpod:
+
+| Dimension | Helikon-OS intent | Tradeoff |
+|---|---|---|
+| Filesystem | Native writable HFS+, no overlay, no FAT | FAT32 iPods unsupported; HFS+ writer is hard. |
+| Data safety | Journal, checksums, scrub, fsck gate | More code and slower writes than an overlay. |
+| UI | Clean first-party UI plus a Rockbox skin subset | Full WPS compatibility is not promised. |
+| Extensibility | Sandboxed apps/games, not raw plugins | Smaller ecosystem at launch; no legacy plugin binary compatibility. |
+| Battery/RAM | Measured budgets and a power state machine | Aggressive goals can conflict with responsiveness. |
+| Ecosystem | Desktop app, installer, updates, docs | A second product to build and maintain. |
+| Devices | 6G/7G first, ports later | Wide support is a roadmap, not a v1 claim. |
+
+A modern alternative is not “Rockbox with a new name.” It is a smaller,
+documented system with a real write engine, a safe extension model and a
+maintainable release process. It will have fewer features at launch than
+Rockbox. That is acceptable if the features it has are correct.
+
+### 28.5 Goal conflicts and resolution
+
+The goals pull against each other. The project needs explicit rules:
+
+| Conflict | Resolution |
+|---|---|
+| Full Rockbox skin compatibility vs lightweight code | Support a documented subset; reject pathological skins; never copy the full WPS engine. |
+| Apps/games vs security and battery | Sandboxed runtime, quotas, no raw hardware, optional install; no background apps in v1. |
+| On-device database vs RAM and playback | Incremental, resumable, low-priority; host builder remains the default. |
+| Battery vs fast I/O and UI | Measure both; prefer disk sleep and partial redraw; report the tradeoff. |
+| Anti-corruption scrub vs SD wear and power | Scrub only while charging and idle; rate-limit; allow the user to disable. |
+| Multi-device support vs v1 schedule | 6G first, 7G next; other targets are P2 and cannot delay v1. |
+| No FAT vs install base | State the requirement clearly; desktop app checks and explains; no hidden FAT fallback. |
+| Rich album/artist metadata vs no network and copyright | Local tags and user-supplied sidecars; no scraping or bundled proprietary text. |
+| Car protocol vs certification risk | Tier 1 line-out/charging first; Tier 2 protocol subset is optional. |
+| External DAC vs 6G hardware | Internal codec only on 6G; USB DAC is out of scope without USB host. |
+
+What the project does **not** promise:
+
+- 100% Rockbox WPS compatibility;
+- Rockbox plugin or game binary compatibility;
+- FAT32 support;
+- self-healing data repair without a backup;
+- external USB DAC support on the 6G;
+- every iPod model or other MP3 player at launch;
+- battery improvement without a recorded measurement.
+
+### 28.6 Goal acceptance scorecard
+
+No goal is “done” without evidence. The minimum scorecard:
+
+| Goal | Metric | Target | Method | Gate |
+|---|---|---|---|---|
+| Battery | Playback hours vs Rockbox baseline | ≥10% improvement (goal, not promise) | 3 runs, same media/settings | v1 hardening |
+| RAM | Peak usage, 10k tracks | Within §28.3.2 budget | Watermark + soak | v1 |
+| UI | List scroll / screen open | 30 fps / <200 ms | Device trace | v1 |
+| Skins | Corpus compatibility | Documented subset, 20 skins | Visual + tag report | v1.x |
+| Adapters | Matrix pass | SD/CF/SSD/HDD | Boot/play/write/sleep | v1 |
+| Database | 10k build + resume | Completes, host parity | Power-cut at 25/50/75% | v1.x |
+| Anti-corruption | Injected corruption detection | 100% detected, 0 false OK | Bit/block injection | v1.x |
+| Write speed | Sequential/random vs donor | No read regression; measured write cost | Benchmark suite | v1.x |
+| Updates | Update/rollback | Old image bootable after cut | Fault injection | v1 |
+| Install | Non-coder task | Completes with checklist | Moderated test | v1 |
+| DAC | Line-out measurements | Published, no regression | Audio rig | v1.x |
+| Read/write | 1 GiB copy, 1k files | Within measured budget | Device benchmark | v1.x |
+| Podcasts | 500 episodes | Resume/sync correct | Device + desktop | v1.x |
+| Desktop app | Task matrix | Import/tag/rate/scrobble/install | macOS first | v1.x |
+| Album/artist | 10k library | Open <200 ms, 30 fps | Device trace | v1.x |
+| Car | Receiver matrix | Resume/charge/no pops | 100 ignition cycles | v1.x |
+| Games/apps | Sandbox | No escape, crash isolation | Adversarial tests | v2 |
+| 7G/ports | Per-target matrix | Boot/play/charge/write | Device run | v2 |
+| Community | Release audit | Public docs, CI, signed builds | Checklist | continuous |
+
+A goal may be deferred, but it may not be silently dropped. The roadmap and
+release notes must say which goals are in, which are out and which are
+unproven.
 
 ## Appendix A — Custom file ledger
 
@@ -1628,8 +2535,8 @@ Line counts are from the audit tree; they will drift.
 | `firmware/drivers/` | 110 | 34,679 | K/M | Keep audio/storage primitives; new policy. |
 | `firmware/kernel/` | 20 | 4,739 | K | Keep scheduler/queues/mutexes; simplify. |
 | `firmware/target/arm/s5l8702/` | 85 | 15,616 | K | Keep HAL. |
-| `themes/` | 133 | 55,636 | X/select | One default theme. |
-| `wps/` | 245 | 80,427 | X | No legacy skin language. |
+| `themes/` | 133 | 55,636 | X/select | One default theme; compatibility corpus. |
+| `wps/` | 245 | 80,427 | X/ref | Compatibility subset only; no full engine. |
 | `fonts/` | 90 | large | K/select | Two or three fonts. |
 | `icons/` | 58 | 21,566 | K/select | One icon set. |
 | `docs/` | 49 | 11,505 | K/M | Keep invariants, audit, validation. |
@@ -1651,7 +2558,14 @@ These are design targets, not promises:
 | UI | ~4,000 | new | First-party screens. |
 | USB/diagnostics | ~1,500 | USB/diag concepts | Read-only, structured logs. |
 | Host tools | ~5,000 | `tools/hfsplus`, `tools/rockpod` | New schema/exporter. |
-| **Product core** | **~30,000–37,000** | — | Excludes selected codecs and assets. |
+| Skin compatibility | 1,500–2,500 | WPS corpus; new subset parser | Not the full WPS engine. |
+| App/game runtime | 3,000–5,000 | new; WASM/bytecode | Sandbox, quotas, SDK. |
+| On-device database builder | 1,200–2,000 | host builder concept | Incremental and resumable. |
+| Anti-corruption | 800–1,200 | new | Checksum index, scrub, quarantine. |
+| Podcast and car UI | 1,000–2,000 | new | Host sync, chapters, line-out/control. |
+| Installer/update client | 1,500–2,500 | new + host tools | Signed updates, rollback, wizard bridge. |
+| **Product core** | **~40,000–52,000** | — | Excludes selected codecs and assets. |
+| **Desktop app** | **8,000–15,000** | new host product | Not counted in the firmware core. |
 
 The current inherited app/plugin tree is roughly **2.7 million lines**. A product
 core in the tens of thousands of lines is the difference between a new firmware
@@ -1716,10 +2630,19 @@ implementation because the donor never wrote native HFS+.
 | `hfs_journal.c` | 900–1,400 | Journal header, records, checksums, replay, barriers. |
 | `hfs_bootstate.c` | 150–250 | Two-slot boot-state record, read-only from the bootloader. |
 | `hfs_fsck_compat.c` | 300–500 | Invariant checks that mirror `fsck_hfs` rules and explain failures. |
+| `skin_compat.c` | 1,500–2,500 | Rockbox WPS subset parser and scene mapping. |
+| `app_runtime.c` | 3,000–5,000 | Sandbox, quotas, host API and package loader. |
+| `db_build.c` | 1,200–2,000 | Incremental on-device database builder. |
+| `checksum_db.c` | 400–700 | Sidecar checksum index and verification. |
+| `scrub.c` | 300–500 | Charging/idle scrub scheduler and quarantine report. |
+| `podcast.c` | 600–1,000 | Episode model, chapters, speed and resume. |
+| `car_link.c` | 500–900 | Line-out/charging detection and accessory subset. |
+| `update_client.c` | 800–1,200 | Signed manifest, staging, rollback and boot-state handoff. |
 
 These are the real cost of “straight writable HFS+.” The donor overlay engine was
 roughly two thousand lines; the native writer is several times that, plus the
-journal.
+journal. The desktop app is a separate host product of 8,000–15,000 lines and is
+not part of the firmware image.
 
 ## Appendix B — Inherited hotspot ledger
 
@@ -1746,8 +2669,8 @@ journal.
 | `firmware/common/fileobj_mgr.c` | 451 | R | New handle/cache model. |
 | `apps/recorder/albumart.c` | 435 | M | Keep cache idea; new policy. |
 | `apps/gui/` | 20,127 | M/R | New retained UI. |
-| `wps/` | 80,427 | X | Legacy skin language. |
-| `themes/` | 55,636 | X | Select one default theme. |
+| `wps/` | 80,427 | X/ref | Compatibility corpus only; no full WPS engine. |
+| `themes/` | 55,636 | X/select | One default theme; corpus for compatibility tests. |
 | `fonts/` | large | K/select | Two or three fonts. |
 | `icons/` | 21,566 | K/select | One icon set. |
 
@@ -1755,24 +2678,27 @@ journal.
 
 **Keep:** S5L8702 HAL, ATA transport, partition scanner, HFS+ reader and
 validators, donor overlay format/validator for migration and export only,
-DFU/NOR knowledge, host tests, selected codecs, one font/icon/theme set,
-documentation invariants.
+DFU/NOR knowledge, host tests, selected codecs, one font/icon set, the Rockbox
+WPS corpus for compatibility reference, documentation invariants.
 
 **Modify:** boot flow, HFS+ namespace (remove the overlay merge), FAT adapter,
 diagnostics, settings storage, USB descriptors, debug UI, build system,
-migration exporter.
+migration exporter, UI for album/artist/podcast views.
 
 **Replace:** VFS/file layer, tagcache/tagtree, playlist storage, playback state
 machine, UI framework, database schema. **Build new:** the HFS+ catalog/bitmap/
-extents writer, journal and transaction engine.
+extents writer, journal and transaction engine, skin compatibility layer,
+app/game runtime, on-device database builder, anti-corruption checksum/scrub,
+installer/update client and desktop app.
 
 **Exclude:** the overlay as a live write path, journal bypass or silent disable,
 native metadata writes outside a transaction, overlay or write code in the
 bootloader, `--single`, writeable USB, zeroing metadata to reset, silent
 unsupported-file hiding, live legacy overlay formats, tagcache/dircache, the
-full plugin tree, the raw plugin hardware API, legacy WPS/themes, unsigned
-updates, periodic early-boot power callbacks, unmeasured power/charging changes,
-and the full Rockbox application copy.
+full plugin tree, the raw plugin hardware API, the full WPS engine and bundled
+themes, FAT filesystem mount, unsigned updates, periodic early-boot power
+callbacks, unmeasured power/charging changes, and the full Rockbox application
+copy.
 
 ## Appendix D — Chosen name: Helikon-OS
 
@@ -1863,6 +2789,7 @@ organized by action rather than by directory, so a non-coder can follow it.
 | Debug menu | Shows disk, overlay and system diagnostics. | `debug_menu.c` | Split into small panels: disk, filesystem, journal, transaction, boot state. | 3,141 lines is too much for a diagnostic screen. |
 | USB LUN and MBR relabel | Presents a read-only HFS+ view to macOS. | USB storage code | Keep read-only, explicit descriptors, RAM-only relabel. | The relabel must never be persisted to the partition table. |
 | Album-art cache | Avoids repeated folder-art probes. | `albumart.c` | One directory cache, explicit invalidation after writes. | Negative caching can go stale. |
+| Rockbox WPS corpus and assets | Skins used for compatibility testing. | `wps/`, `themes/`, `fonts/` | Use as a test corpus; map a documented subset; do not redistribute without permission. | The full engine is huge and asset licences vary. |
 | Build system | Configures and builds Rockbox. | `tools/configure`, Makefiles | Add reproducible builds, size budgets, signed manifests, fuzz targets. | Current build is tied to the old product shape. |
 | Host tools | Build database, artwork and overlay exports. | `tools/rockpod/` | New database schema and a donor-overlay exporter to native files. | Old tools write old formats. |
 | Documentation | Explains install, safety and validation. | `README`, `shipping.md`, docs | Rename, simplify, keep invariants, add journal/fsck gates. | Docs drift faster than code. |
@@ -1879,14 +2806,18 @@ organized by action rather than by directory, so a non-coder can follow it.
 | Extents overflow writer | Donor only reads it. | Insert/update/delete overflow records and truncate correctly. |
 | Journal and transaction engine | Donor only detects and refuses a dirty journal. | Append, commit, barrier, replay and abort with checksums. |
 | Donor overlay allocator/store/load | Bitmap/entry/data ordering is hard to reason about. | Read it for commit-order ideas; do not port the engine. |
-| Tagcache and tagtree | 8,700+ lines of cache, changelog, dircache and cursor logic. | Immutable host-built database and a small browser. |
+| Tagcache and tagtree | 8,700+ lines of cache, changelog, dircache and cursor logic. | Host-built database first, incremental on-device builder later, and a small browser. |
 | Playback state machine | 4,363 lines tied to legacy buffering and events. | Smaller buffer/decoder/output state machine. |
 | Playlist storage | Legacy control-file machinery. | Versioned playlist file written through the transaction engine. |
 | Settings engine | Huge table and callback system. | New schema and two-slot config store. |
-| UI/GUI/WPS | 20k GUI lines plus 80k WPS assets. | Retained-mode screens and one theme format. |
-| Plugin API | Raw hardware and storage access. | No plugins in v1, capability API later. |
-| Database builder | Old schema and tagcache assumptions. | New schema, host-first, checksummed. |
-| Update flow | Unsigned image and fixed jump. | Manifest, hash, signature, boot-state and rollback policy. |
+| UI/GUI/WPS engine | 20k GUI lines plus an 80k-line skin language. | Retained-mode screens, one native theme, plus a documented WPS subset. |
+| Plugin API | Raw hardware and storage access. | No legacy plugins; a sandboxed app/game runtime with capabilities. |
+| Database builder | Old schema and tagcache assumptions. | Host builder first, then an incremental on-device builder. |
+| Anti-corruption | HFS+ checksums metadata only; no data checksums. | Sidecar checksum index, charging/idle scrub, quarantine. |
+| Update and installer | Unsigned image and fixed jump. | Signed manifest, rollback, guided installer, boot-state. |
+| Podcast support | No host sync or episode model. | Host RSS fetch, device episode model, chapters, resume, speed. |
+| Car/accessory support | Limited dock handling. | Line-out/charging first, then a protocol subset. |
+| Desktop app | CLI host tools only. | Native app for tagging, ratings, scrobbling, install, backup. |
 | Power policy | Unmeasured states and early-boot callbacks. | Explicit state machine with measured transitions and a battery write gate. |
 | Theme/asset pipeline | 133 themes and a large skin language. | One default theme, selectable fonts/icons. |
 
@@ -1909,14 +2840,16 @@ organized by action rather than by directory, so a non-coder can follow it.
 | Tagcache and dircache | Huge, legacy, redundant with a new database. | Immutable database and direct lookup. |
 | Full plugin tree | 946k lines, raw hardware, security and size risk. | First-party features; sandbox later. |
 | Raw plugin hardware API | A plugin can brick the device or corrupt storage. | Capability API only, or no plugins. |
-| Legacy WPS/themes | 80k lines of skin language and assets. | One new theme format. |
+| Full WPS engine and bundled themes | 80k lines of skin language and assets; licences vary. | Documented compatibility subset plus one default theme. |
 | Unsigned firmware/plugins | No integrity or trust boundary. | Signed manifest and explicit trust. |
 | Periodic early-boot callbacks | Caused a 4–6 second freeze in the donor. | Explicit state machine and idle policy. |
 | Cached PMU/backlight state without invalidation | Can leave the device dark or dead after sleep. | Invalidate on every transition. |
 | Unmeasured overclock/undervolt/charging | Can damage hardware or battery. | Measured, documented policies only. |
-| APFS/HFSX/FAT32-primary design | Outside the product’s filesystem contract. | HFS+ native, FAT read-only fallback if needed. |
+| APFS/HFSX/FAT32-primary design | Outside the product’s filesystem contract. | HFS+ native only; no FAT mount. |
+| FAT filesystem mount | The README goal is explicit: no FAT support. | HFS+ only; `NOT_HFS` for other volumes. |
+| Rockbox plugin/game binary compatibility | The legacy API exposes raw hardware and cannot be sandboxed. | New sandboxed apps/games; no binary compatibility claim. |
 | Full Rockbox application layer | Inherits 20 years of unrelated features. | Product-specific player/UI. |
-| On-device full database rebuild in v1 | Slow, risky and unnecessary for first boot. | Host-built database; on-device later. |
+| On-device full database rebuild in v1 | Slow, risky and unnecessary for first boot. | Host builder first; incremental on-device builder in v1.x. |
 | Unbounded dynamic caches | 64 MiB RAM cannot absorb them. | Fixed budgets and eviction policies. |
 
 ### E.5 Copy order if you are assembling the donor knowledge
@@ -1932,7 +2865,9 @@ organized by action rather than by directory, so a non-coder can follow it.
 9. Selected codecs/DSP.
 10. Read-only USB and diagnostics.
 11. Donor overlay format/validator for the host exporter only.
-12. Fonts/icons and documentation.
+12. Rockbox WPS corpus and font assets for compatibility testing (reference only).
+13. Host tool concepts for the desktop app (reference only).
+14. Fonts/icons and documentation.
 
 There is no donor native HFS+ writer. The catalog, bitmap, extents and journal
 modules are written from the HFS+ specification and validated against macOS.
@@ -1985,6 +2920,19 @@ This is a knowledge-copy order, not a build order. Build order is in §27.
 | **Tagcache** | A legacy Rockbox metadata database. Helikon-OS replaces it. |
 | **BSS** | Zero-initialised global memory in a firmware image. |
 | **DRAM** | The iPod’s 64 MiB main memory. |
+| **WPS** | Rockbox’s text-based “While Playing Screen” skin format. |
+| **Skin/viewport** | A visual layout and the rectangular regions inside it. |
+| **App runtime** | The sandboxed environment that runs Helikon-OS apps and games. |
+| **Sandbox** | A restricted execution environment with explicit permissions and quotas. |
+| **WASM** | WebAssembly, a portable bytecode used here as a sandboxed app format. |
+| **Scrobble** | Sending a played track to Last.fm, done by the desktop app, not the device. |
+| **Podcast/RSS** | A feed of episodes fetched by the desktop app and synced to the device. |
+| **Car link/AAP** | The 30-pin accessory path; AAP is Apple’s accessory protocol. |
+| **Scrub** | A background read-and-verify pass over files to detect corruption. |
+| **Checksum sidecar** | A separate index of file hashes, since HFS+ does not checksum data. |
+| **Roonserver** | A rich music-browsing interface used as inspiration, not a dependency. |
+| **Porting layer** | The per-device code that adapts the shared firmware to one board. |
+| **FAT** | A simpler filesystem used by some iPods; Helikon-OS does not mount it. |
 
 ## Appendix G — FAQ
 
@@ -1998,7 +2946,9 @@ AI/developer. A non-coder can manage the build, backups, device tests,
 acceptance gates and release checklist.
 
 **Will it run on my iPod?**<br>
-The first target is the iPod Classic 6G. Other S5L8702 iPods are future work.
+The first target is the iPod Classic 6G. The 7G is the next named target and
+requires a board audit before support is claimed. Other iPods and other players
+are ports, not launch promises.
 
 **Will it erase my music?**<br>
 It can, if the write engine has a bug. That is why the plan separates a
@@ -2010,6 +2960,10 @@ an only-copy library.
 Yes. That is the point. Native HFS+ is the writable filesystem. Files the device
 creates are ordinary HFS+ files, visible to macOS, not hidden in an overlay.
 
+**Does Helikon-OS support FAT32?**<br>
+No. The project goal is HFS+ native without an overlay or FAT. A FAT32 iPod is
+reported as `NOT_HFS`; the desktop app explains how to back up and convert it.
+
 **Will macOS still read the volume?**<br>
 That is a release gate. Every crash test must leave a volume that `fsck_hfs`
 reports clean and macOS mounts. If macOS disagrees with the device, the build is
@@ -2018,14 +2972,40 @@ wrong.
 **Can I still boot Apple firmware?**<br>
 Yes, if the Apple NOR path is preserved. Never use `--single`.
 
-**Will my Rockbox plugins work?**<br>
-Not in v1. The plugin API is deliberately absent until a capability sandbox
-exists. PictureFlow, album art and database browsing become first-party
-features.
+**Will my Rockbox skins work?**<br>
+A documented subset will. Helikon-OS is not a full WPS engine; it parses the
+common layout, tags, images, fonts and progress elements and reports unsupported
+features. The 20-skin compatibility corpus is the evidence, not a blanket
+promise.
 
-**Why not FAT32?**<br>
-FAT32 conversion is inconvenient and loses the Mac-native HFS+ library.
-Helikon-OS is for people who want to stay on HFS+.
+**Will my Rockbox plugins or games work?**<br>
+No. Legacy plugins expose raw hardware and are excluded. The README goal for
+custom games/apps is a new sandboxed runtime with permissions and quotas, not
+binary compatibility with Rockbox.
+
+**Is there a desktop app?**<br>
+Yes, planned. macOS first, because it can write HFS+ in Disk Mode. Windows/Linux
+need either a tested HFS+ path or a Helikon-OS USB service mode; the paper treats
+that as an open decision, not a shipped feature.
+
+**Does it scrobble to Last.fm?**<br>
+The desktop app scrobbles from play history, opt-in. The device has no network
+and does not upload listening history.
+
+**Can I use an external USB DAC?**<br>
+Not on the 6G: the iPod is a USB device, not a USB host. The goal is to use the
+internal CS42L55 path correctly and measure it. A future target with USB host
+could revisit this.
+
+**Will it work in my car?**<br>
+Tier 1 is line-out, charging, resume and safe power behavior. Tier 2 is a subset
+of the 30-pin accessory protocol for controls and metadata, with legal and
+reverse-engineering risk. Tier 2 is optional.
+
+**Is anti-corruption self-healing?**<br>
+No. It detects metadata and data corruption, quarantines the file and reports
+it. Repair comes from a backup or a known-good copy. Silent “repair” is not a
+feature.
 
 **Does it need journaling?**<br>
 For a library you care about, yes. The release design writes journaled HFS+.
@@ -2043,16 +3023,27 @@ Yes. A host exporter reads the donor overlay and writes the files into ordinary
 native HFS+ directories, with verify-before-switch and rollback. The firmware
 does not “repair” the old container.
 
+**Will the battery improvement be guaranteed?**<br>
+No. It is a measured goal against a recorded Rockbox baseline on the same
+hardware, media and settings. If the measurement does not support the claim, the
+claim is withdrawn.
+
+**Can I use it on other MP3 players?**<br>
+That is exploratory. The architecture has a porting layer, but support requires
+hardware, documentation and a maintainer with a test device. It is not a v1
+promise.
+
 **How long will this take?**<br>
 Months to years, not an afternoon. The donor build is a day. The first read-only
-player is a larger project. The HFS+ writer, the journal and the device matrix
-are the long poles. The donor overlay was small because it never had to
-understand HFS+ B-tree mutation.
+player is a larger project. The HFS+ writer, the journal, the desktop app and
+the device matrix are the long poles. The donor overlay was small because it
+never had to understand HFS+ B-tree mutation.
 
 **What can I test without coding?**<br>
 Toolchain builds, host tests, backups, Disk Mode/DFU, boot, playback, sleep,
-USB read-only, `fsck_hfs` runs, crash-image replay rehearsals, migration
-rehearsals and the device matrix.
+USB read-only, `fsck_hfs` runs, battery/RAM measurements, skin corpus, adapter
+matrix, crash-image replay, migration rehearsals and the goal scorecard in
+§28.6.
 
 **What should I never do?**<br>
 Never format, erase, restore or delete the journal to fix a software error.
@@ -2064,9 +3055,9 @@ No. It is an independent system. Rockbox and Rockpod are upstream lineage and
 must be credited, but the product identity is Helikon-OS.
 
 **How can I help?**<br>
-Test on different 6G revisions and storage adapters. Record boot, sleep,
-playback, write, crash-recovery and USB results. Report exact firmware/build
-hashes, `fsck_hfs` output and logs.
+Test on different 6G/7G revisions, storage adapters, cards, receivers and skin
+corpora. Record boot, sleep, playback, write, crash-recovery, battery, RAM and
+USB results. Report exact firmware/build hashes, `fsck_hfs` output and logs.
 
 ## Appendix H — Build worksheet
 
@@ -2119,16 +3110,38 @@ Copy this into a notes file and fill it in before touching a device.
 
 | Phase | Evidence | Pass? | Date |
 |---|---|---|---|
-| 0 Donor build | | | |
-| 1 Recovery/backup | | | |
-| 2 Read-only prototype | | | |
-| 3 Non-journaled write prototype (disposable) | | | |
-| 4 Journaled write engine | | | |
-| 5 Database/player/UI | | | |
-| 6 USB/update/migration | | | |
-| 7 Hardening | | | |
+| 0 Rescue bootloader/read-only skeleton | | | |
+| 1 Read-only player | | | |
+| 2 Non-journaled write prototype (disposable) | | | |
+| 3 Journaled write engine | | | |
+| 4 Metadata parity and user state | | | |
+| 5 Anti-corruption foundations | | | |
+| 6 Migration + host tools + desktop MVP | | | |
+| 7 Database (host + on-device) | | | |
+| 8 UI goals (album/artist/skins/podcast/car) | | | |
+| 9 USB/update/installer/desktop v1 | | | |
+| 10 Apps/games sandbox | | | |
+| 11 Battery/RAM/performance hardening | | | |
+| 12 Multi-device ports + release train | | | |
 
-### H.5 Hard stops
+### H.5 Goal evidence
+
+| Goal | Evidence recorded | Pass? |
+|---|---|---|
+| Battery | Playback hours and sleep drain vs Rockbox baseline | |
+| RAM | Peak watermark on 10k tracks | |
+| UI | Task list, screen-open latency, frame rate | |
+| Skins | Corpus load/render report | |
+| Adapters | SD/CF/SSD/HDD matrix | |
+| Database | 10k build, power-cut resume, host parity | |
+| Anti-corruption | Injected corruption detected/quarantined | |
+| Updates/install | Update, rollback, bad-image rejection, non-coder install | |
+| Desktop app | Tag, rate, scrobble, install, backup | |
+| Podcasts/album/artist/car | 500 episodes, 10k library, receiver matrix | |
+| Apps/games | Sandbox escape and crash-isolation tests | |
+| 7G/ports | Per-target boot/play/charge/write | |
+
+### H.6 Hard stops
 
 - [ ] This is not the only copy of the music.
 - [ ] The backup has been read back.
@@ -2156,3 +3169,10 @@ Helikon-OS is the harder, more useful promise: the iPod owns its HFS+ library,
 writes ordinary files, survives a power cut, and hands the volume back to macOS
 without a hidden namespace or a repair prompt. That is the standard the rest of
 this paper is trying to meet.
+
+The README goals are the product side of the same promise: longer battery life,
+lower RAM, a clean interface, Rockbox skin compatibility, better adapters and
+database building, anti-corruption, faster I/O, podcasts, car playback, a
+desktop app, sandboxed apps and games, and eventually more devices. They are
+sequenced, measured and allowed to be deferred—but not quietly dropped. A goal
+without recorded evidence is still a wish.
